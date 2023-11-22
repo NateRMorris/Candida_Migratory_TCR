@@ -1,0 +1,865 @@
+---
+title: "Candida_sc_Analysis.Rmd"
+author: "Nathan Morris"
+date: "2023-11-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = getwd())
+```
+
+### Data Import
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+# Data Import
+library(Seurat)
+library(scater)
+library(dplyr)
+library(SingleR)
+library(celldex)
+library(scRNAseq)
+library(scran)
+library(gridExtra)
+library(pheatmap)
+library(ess)
+library(reshape2)
+library(ggpubr)
+library(scCustomize)
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+```
+
+```{r}
+seurat_object <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT_new_metadata.Rds"))
+```
+
+```{r}
+Idents(object = seurat_object) <- "RNA_clusters"
+
+DimPlot(seurat_object, reduction = "umap_rna", label = TRUE, repel = TRUE) + ggtitle("RNA UMAP with RNA Clusters")
+DimPlot(seurat_object, reduction = "umap_adt", label = TRUE, repel = TRUE) + ggtitle("ADT UMAP with RNA Clusters")
+
+Idents(object = seurat_object) <- "ADT_clusters"
+DimPlot(seurat_object, reduction = "umap_adt", label = TRUE, repel = TRUE) + ggtitle("RNA UMAP with ADT Clusters")
+```
+
+# 1. RNA ADT Cluster Comparison
+```{r}
+compare_cluster1 <- seurat_object$Protein_clusters
+compare_cluster2 <- seurat_object$RNA_clusters
+
+cluster_intersection <- matrix(nrow = length(unique(compare_cluster1)), ncol = length(unique(compare_cluster2)))
+cluster_union <- matrix(nrow = length(unique(compare_cluster1)), ncol = length(unique(compare_cluster2)))
+
+for (i in seq(1:nrow(cluster_intersection))){
+  cluster.i <- i - 1
+  numi <- compare_cluster1 == cluster.i
+  for (j in seq(1:ncol(cluster_intersection))){
+    cluster.j <- j - 1
+    numj <- compare_cluster2 == cluster.j
+    cluster_intersection[i,j] <- sum(numi == TRUE & numj == TRUE)
+    cluster_union[i,j] <- sum(numi == TRUE | numj == TRUE)
+  }
+}
+
+cluster_matrix <- cluster_intersection / cluster_union
+rownames(cluster_matrix) <- paste("ADT", sort(unique(compare_cluster1)))
+colnames(cluster_matrix) <- paste("RNA", sort(unique(compare_cluster2)))
+
+new_matrix <- cbind(cluster_matrix[,"RNA 3"], cluster_matrix[,"RNA 2"], cluster_matrix[,"RNA 1"], cluster_matrix[,"RNA 0"], cluster_matrix[,"RNA 4"], cluster_matrix[,"RNA 5"], cluster_matrix[,"RNA 6"], cluster_matrix[,"RNA 10"], cluster_matrix[,"RNA 7"], cluster_matrix[,"RNA 11"], cluster_matrix[,"RNA 12"], cluster_matrix[,"RNA 9"], cluster_matrix[,"RNA 13"], cluster_matrix[,"RNA 14"], cluster_matrix[,"RNA 15"],cluster_matrix[,"RNA 16"] )
+colnames(new_matrix) <- c("RNA 3","RNA 2","RNA 1","RNA 0","RNA 4","RNA 5","RNA 6","RNA 10","RNA 7","RNA 11", "RNA 12", "RNA 9","RNA 13","RNA 14","RNA 15","RNA 16")
+
+pheatmap(new_matrix,main = "Cluster Similarity Heatmap between RNA and ADT Clusters", cluster_rows = FALSE, cluster_cols = FALSE)
+```
+
+
+# 2.  Singler Annotate Clusters
+
+RNA Annotation
+```
+# Using Built in References
+#https://bioconductor.org/packages/release/data/experiment/vignettes/celldex/inst/doc/userguide.html#23_Mouse_RNA-seq
+
+# Using Immunological Genome Project ImmGen dataset
+immgen.se <- celldex::ImmGenData()
+
+immgen.main.RNA <- SingleR(test = GetAssayData(seurat_object, assay = "RNA", slot = "data"), ref = immgen.se, labels = immgen.se$label.main)
+
+seurat_object[["Immgen.main.RNA"]] <- immgen.main.RNA$labels
+
+immgen.fine.RNA <- SingleR(test = GetAssayData(seurat_object, assay = "RNA", slot = "data"), ref = immgen.se,labels = immgen.se$label.fine)
+
+seurat_object[["Immgen.fine.RNA"]] <- immgen.fine.RNA$labels
+
+table(immgen.main.RNA$labels)
+table(immgen.fine.RNA$labels)
+```
+
+As stated on the celldex reference page. The ImmGen() is particularly useful to those interested in CD4+ T cell subsets, though the lack of CD4+ central memory and effector memory samples may decrease accuracy in some cases. In addition, the lack of dendritic cells and a single B cell subset may result in those populations being improperly labeled or having their label pruned in a typical PBMC sample.
+
+Annotation is cannot always be trusted, but gives us a sense of the heterogeneity in the sample even after using FACs sorting / CD45+ CD3e+ gating strategy to get only whole CD3+ cell types. 
+
+ADT Annotation
+```
+# Have to make them capitalized to match the ADT rownames / antibody tag names
+rownames(immgen.se) <- lapply(rownames(immgen.se), function(x) toupper(x))
+
+immgen.main.ADT <- SingleR(test = GetAssayData(seurat_object, assay = "ADT", slot = "data"), ref = immgen.se, labels = immgen.se$label.main)
+
+seurat_object[["Immgen.main.ADT"]] <- immgen.main.ADT$labels
+
+immgen.fine.ADT <- SingleR(test = GetAssayData(seurat_object, assay = "ADT", slot = "data"), ref = immgen.se,labels = immgen.se$label.fine)
+
+seurat_object[["Immgen.fine.ADT"]] <- immgen.fine.ADT$labels
+
+table(immgen.main.ADT$labels)
+table(immgen.fine.ADT$labels)
+```
+
+Here, I'm able to use the Immgen annotations on the Cite-Seq data by capitalizing them.
+
+```
+saveRDS(seurat_object, file = "data_post_Singler.Rds")
+```
+
+Load the file from directory with annotations, so re-run isn't necessary
+```
+seurat_object <- readRDS("data_post_Singler.Rds")
+```
+
+```
+head(rev(sort(table(seurat_object$Immgen.fine.RNA))))
+head(rev(sort(table(seurat_object$Immgen.fine.ADT))))
+```
+
+As we can see, all cells consist of the T cell type. Fine annotations give us a more detailed description.
+Based on the RNA, we primarily see the T.CD4TESTCJ, and based on the ADT we primarily see T.4EFF49D+11A+.D8.LCMV.
+
+## 2.A RNA Dimplots with Singler Annotations
+
+```
+DefaultAssay(object = seurat_object) <- "RNA"
+#seurat_object <- ScaleData(object = seurat_object, features = rownames(GetAssayData(object = seurat_object, slot = "counts", assay = "RNA")), assay = "RNA")
+seurat_object <- ScaleData(object = seurat_object, features = rownames(GetAssayData(object = seurat_object, slot = "data", assay = "RNA")), assay = "RNA") # Need to do this for the DoHeatMap() function to work
+```
+
+```
+Idents(object = seurat_object) <- "Immgen.main.RNA"
+
+DimPlot(seurat_object, reduction = "umap_rna", label = TRUE, repel = TRUE) + ggtitle("RNA UMAP with RNA main Annotations")
+
+Idents(object = seurat_object) <- "Immgen.fine.RNA"
+
+DimPlot(seurat_object, reduction = "umap_rna", label = TRUE, label.size = 2, repel = TRUE) + NoLegend() + ggtitle("RNA UMAP with RNA fine Annotations")
+
+Idents(object = seurat_object) <- "Immgen.main.ADT"
+
+DimPlot(seurat_object, reduction = "umap_rna", label = TRUE, repel = TRUE) + ggtitle("RNA UMAP with ADT main Annotations")
+
+Idents(object = seurat_object) <- "Immgen.fine.ADT"
+
+DimPlot(seurat_object, reduction = "umap_rna", label = TRUE, label.size = 2, repel = TRUE) + NoLegend() + ggtitle("RNA UMAP with ADT fine Annotations")
+```
+
+Main annotations for RNA are much clearer than using the Cite-Seq for annotations. However, based on the main annotations, both assays show the cells are particularly consisting of T cells with few NKT cells and Tgd cells mixed in. Finer annotations show too many different sub-cell types, therefore the legends are not included here.
+
+Based on the main RNA and the fine RNA, there are clear distinctions between clusters. Therefore, each cluster is a single cell type or a a mixture of a few different types of cells.
+
+But with the main ADT clusters are more interdispersed, as there are more likely cells misnamed. We get B cells, stem cells and Epithelial cells, when we know we sorted for T-cells.
+
+# 3. Cell composition for each cluster by organ
+```{r}
+cluster_organ_comp <- as.data.frame(matrix(nrow = length(unique(seurat_object$RNA_clusters)), ncol = 4))
+colnames(cluster_organ_comp) <- c("Cluster", "Lung %", "Colon %", "mLns %" )
+#unique(seurat_object$RNA_clusters)
+for (i in 0:16){
+  cluster_organ_comp[i+1,"Cluster"] = i
+  #table(seurat_object$Organ[which(seurat_object$RNA_clusters == i)])
+  cluster_organ_comp[i+1,"Lung %"] <- ((length(which(seurat_object$Organ[which(seurat_object$RNA_clusters == i)] == "Lung")))/(length(seurat_object$Organ[which(seurat_object$RNA_clusters == i)])))
+  cluster_organ_comp[i+1,"Colon %"] <- ((length(which(seurat_object$Organ[which(seurat_object$RNA_clusters == i)] == "Colon")))/(length(seurat_object$Organ[which(seurat_object$RNA_clusters == i)])))
+  cluster_organ_comp[i+1,"mLns %"] <- ((length(which(seurat_object$Organ[which(seurat_object$RNA_clusters == i)] == "mLns")))/(length(seurat_object$Organ[which(seurat_object$RNA_clusters == i)])))
+}
+
+df_long <- reshape2::melt(cluster_organ_comp, id.vars = "Cluster", variable.name = "Organ", value.name = "Percentage")
+
+ggplot(df_long, aes(x = Cluster, y = Percentage, fill = Organ)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Cluster", y = "Percentage") +
+  scale_fill_manual(values = c("Lung %" = "blue", "Colon %" = "green", "mLns %" = "red")) +
+  theme_minimal() + ggtitle("Cluster Organ Composition") + scale_x_continuous(breaks=seq(1,16,1))
+```
+
+The above shows us that the clusters are each mostly dominant by one or maybe two organ cells. Therefore, the T cells, even if sorted from each organ individually, are still somehow phenotypically associated with their organ of reference.
+
+# 4. Visualizing Infection Differential Abundance
+
+```{r}
+Idents(object = seurat_object) <- "Infection"
+DimPlot(seurat_object, reduction = "umap_rna", label = FALSE, repel = TRUE) +  ggtitle("RNA UMAP by Infection")
+
+DimPlot(seurat_object, reduction = "umap_rna", label = FALSE, repel = TRUE, split.by = "Infection") +  ggtitle("RNA UMAP by Infection")
+```
+
+The RNA UMAP grouped by infection doesn't show any real distinction in any cluster.
+
+The RNA UMAP split by the Infection. As you can see the cluster in the middle (cluster 5) seems to have differential abundance between the Candida and non-infected population, however no new cluster forms when the infection happens.
+
+# 4.A Visualizing Canonical Marker genes and Proteins
+
+```{r}
+# Feature Plots using the WNN UMAP
+# Visualizing the expression of canonical marker genes and proteins on the multimodal UMAP
+
+# How to search for a gene name
+#seurat_object[["RNA"]][grepl("Tcf", rownames(seurat_object[["RNA"]])),][,1]
+
+# Gene Groups from Dr. Iliev's Papers
+gois <- c("Tcf7", "Slamf6", "Ccr7", "Cxcr6", "Foxp3", "Mki67", "Klf2") # from RNA assay
+Tbet <- c("Tbx21")
+stem_like_gois <- c("Ccr7", "Il7r", "Sell", "Tcf7", "Tcf1", "Slamf6", "Klf3", "Il16ra")
+# "Smurf1"
+activation_like_gois <- c("Cd44", "Cd69", "Il17a", "Il17f", "Il22", "Ifng", "Mki67", "Csf2")
+ADT_markers_of_interest <- list("CD8A", "CD4", "CD3", "CCR4.CD194", "CCR6", "CD19") # from Cite-seq Assay
+
+DefaultAssay(object = seurat_object) <- "RNA"
+Idents(object = seurat_object) <- "RNA_clusters"
+seurat_object <- ScaleData(seurat_object)
+
+# Expression Plots
+FeaturePlot(seurat_object, features = c(gois),
+                  reduction = 'umap_rna', 
+                  cols = c("lightgrey","darkgreen"), ncol = 3)
+
+FeaturePlot(seurat_object, features = c(ADT_markers_of_interest),
+                  reduction = 'umap_rna', 
+                  cols = c("lightgrey","darkgreen"), ncol = 3)
+
+FeaturePlot(seurat_object, features = c(activation_like_gois),
+                  reduction = 'umap_rna', max.cutoff = 2, 
+                  cols = c("lightgrey","darkgreen"), ncol = 3)
+
+#RidgePlot(seurat_object, features = c(stem_like_gois), ncol = 2)
+
+DotPlot(seurat_object, features = c(gois)) + RotatedAxis() + ggtitle("RNA Clusters by Th17 stem-like markers")
+
+DoHeatmap(seurat_object, features = c(gois)) + RotatedAxis() + ggtitle("RNA Clusters by Th17 stem-like markers")
+```
+
+Here, I'm using the genes that Dr. Iliev's papers point to as genes that direct the differentiation of Th17 cells. 
+
+Cxcr6, Foxp3 and Mki67 seem to cluster relatively well. Cxcr6 is closely related to cluster 5, and Foxp3 in clusters 7 and 9. Mki67 is expressed a lot in cluster 11. The cite-seq for the CD8A and CD4 antibodies seem to show the two different T cell populations distinctly. This is found in other datasources as well (https://www.sciencedirect.com/science/article/pii/S0092867421005833), where CD8 and CD4 are partially blended together when analyzing the transcriptome but separated clearly in protein data.
+
+
+```{r}
+DefaultAssay(object = seurat_object) <- "ADT"
+ADT_markers <- c("CD62L", "CCR6", "CD4", "CD8A")
+
+FeaturePlot(seurat_object, features = c(ADT_markers),
+                  reduction = 'umap_rna', 
+                  cols = c("lightgrey","darkgreen"), ncol = 2)
+
+like_markers <- c("Rora","Il17a","Ccr6", "Il23r")
+DefaultAssay(object = seurat_object) <- "RNA"
+FeaturePlot(seurat_object, features = c(like_markers),
+                  reduction = 'umap_rna', 
+                  cols = c("lightgrey","darkgreen"), ncol = 2)
+```
+
+
+### Reclustering by organ
+
+Here, I wanted to see if separating the seurat object by organ would allow us to see individual clusters better. And perhaps be able to identify different clusters of interest from these.
+
+There really wasn't much distinction. Therefore, I decided to not have this code run-able.
+```{r}
+organs <- c("Colon", "Lung", "mLns")
+
+seurat_object.colon <- subset(x = seurat_object, subset = (Organ == "Colon"))
+seurat_object.lung <- subset(x = seurat_object, subset = (Organ == "Lung"))
+seurat_object.mlns <- subset(x = seurat_object, subset = (Organ == "mLns"))
+```
+
+
+```
+# Colon
+seurat_object.colon <- FindMultiModalNeighbors(seurat_object.colon, reduction.list = list("umap_rna", "umap_adt"), dims.list = list(1:2,1:2), modality.weight.name = list("WNN.weight_RNA", "WNN.weight_ADT"))
+seurat_object.colon <- RunUMAP(seurat_object.colon, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
+seurat_object.colon <- FindClusters(seurat_object.colon, graph.name = "wsnn", algorithm = 3, resolution = 1, verbose = FALSE)
+unique(seurat_object.colon@meta.data[["wsnn_res.1"]]) # Using resolution = 1 --> Has 10 total clusters
+
+# Lung
+seurat_object.lung <- FindMultiModalNeighbors(seurat_object.lung, reduction.list = list("umap_rna", "umap_adt"), dims.list = list(1:2,1:2), modality.weight.name = list("WNN.weight_RNA", "WNN.weight_ADT"))
+seurat_object.lung <- RunUMAP(seurat_object.lung, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
+seurat_object.lung <- FindClusters(seurat_object.lung, graph.name = "wsnn", algorithm = 3, resolution = 1, verbose = FALSE)
+unique(seurat_object.lung@meta.data[["wsnn_res.1"]]) # Using resolution = 1 --> Has 16 total clusters
+
+# mLns
+seurat_object.mlns <- FindMultiModalNeighbors(seurat_object.mlns, reduction.list = list("umap_rna", "umap_adt"), dims.list = list(1:2,1:2), modality.weight.name = list("WNN.weight_RNA", "WNN.weight_ADT"))
+seurat_object.mlns <- RunUMAP(seurat_object.mlns, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
+seurat_object.mlns <- FindClusters(seurat_object.mlns, graph.name = "wsnn", algorithm = 3, resolution = 1, verbose = FALSE)
+unique(seurat_object.mlns@meta.data[["wsnn_res.1"]]) # Using resolution = 1 --> Has 14 total clusters
+```
+
+```
+Idents(object = seurat_object.colon) <- "WNN_clusters_UMAP"
+DimPlot(seurat_object.colon, reduction = "wnn.umap", label = TRUE, repel = TRUE) +  ggtitle("Colon WNN UMAP by Cluster")
+#WNN.colon <- FindAllMarkers(seurat_object.colon, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+
+#Idents(object = seurat_object.colon) <- "Immgen.fine.RNA"
+Idents(object = seurat_object.colon) <- "Infection"
+DimPlot(seurat_object.colon, reduction = "wnn.umap", label = TRUE, repel = TRUE) +  ggtitle("Colon WNN UMAP by Infection")
+
+Idents(object = seurat_object.lung) <- "WNN_clusters_UMAP"
+DimPlot(seurat_object.lung, reduction = "wnn.umap", label = TRUE, repel = TRUE) +  ggtitle("Lung WNN UMAP by Cluster")
+#WNN.lung <- FindAllMarkers(seurat_object.lung, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+
+#Idents(object = seurat_object.lung) <- "Immgen.fine.RNA"
+Idents(object = seurat_object.lung) <- "Infection"
+DimPlot(seurat_object.lung, reduction = "wnn.umap", label = TRUE, repel = TRUE) +  ggtitle("Lung WNN UMAP by Infection")
+
+Idents(object = seurat_object.mlns) <- "WNN_clusters_UMAP"
+DimPlot(seurat_object.mlns, reduction = "wnn.umap", label = TRUE, repel = TRUE) +  ggtitle("mLns WNN UMAP by Cluster")
+#WNN.mlns <- FindAllMarkers(seurat_object.mlns, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+
+#Idents(object = seurat_object.mlns) <- "Immgen.fine.RNA"
+Idents(object = seurat_object.mlns) <- "Infection"
+DimPlot(seurat_object.mlns, reduction = "wnn.umap", label = TRUE, repel = TRUE) +  ggtitle("mLns WNN UMAP by Infection")
+```
+
+Interesting clusters based on genes of interest - 
+Colon - cluster 3 (Rora, Ccr6, Cxcr6, ) - Could be a T-stem-like, cluster 5 - foxp3 - Could be a T-reg set
+Lung - cluster 4 (Foxp3, rora, Ccr6) - Looks CD8
+mLns - cluster 6 (Foxp3) - Could be a T-reg set
+
+However, based on the Infection UMAPs from each organ, I don't see any clusters of interest, or clusters arising due to the infection.
+
+# 5. Differential Abundance Proptest - Candida infected cell # vs Non-infected # for all organs and WNN_UMAP clusters
+
+
+```{r, warning = FALSE}
+cluster_differences <- function(cluster_name){
+  
+  organs <- c("Colon", "Lung", "mLns")
+  
+  df_organ <- c()
+  df_cluster <- c()
+  df_NT_inClust <- c()
+  df_CA_inClust <- c()
+  df_NT_total <- c()
+  df_CA_total <- c()
+  df_pcNT <- c()
+  df_pcCA <- c()
+  df_pval <- c()
+  
+  n <- 1
+  
+  RNA_organ <- c(seurat_object.colon, seurat_object.lung, seurat_object.mlns)
+  cluster_name <- as.character(cluster_name)
+  
+  for (seurat_object.sub in RNA_organ) {
+    
+    organ <- as.character(unique(seurat_object.sub$Organ))
+    clusters = sort(unique(seurat_object.sub[[cluster_name]][[1]]))
+    
+    for (clust in clusters) {
+  
+      NTc <- nrow(seurat_object.sub@meta.data[seurat_object.sub[[cluster_name]][[1]] == clust & seurat_object.sub@meta.data$Infection == "No", ])
+      # NTc is the number of no Candida from an organ in a particular individual cluster
+      CAc <- nrow(seurat_object.sub@meta.data[seurat_object.sub[[cluster_name]][[1]] == clust & seurat_object.sub@meta.data$Infection == "Ca", ])
+      # CAc is the number of Candida from an organ in a particular individual cluster
+      
+      NT <- nrow(seurat_object.sub@meta.data[seurat_object.sub@meta.data$Infection == "No", ])
+      # Total amount of No infection from the organ
+      CA <- nrow(seurat_object.sub@meta.data[seurat_object.sub@meta.data$Infection == "Ca", ])
+      # Total amount of Ca infection from the organ
+      
+      successes <- c(NTc, CAc)
+      trials <- c(NT, CA)
+      
+      result <- tryCatch({
+    res <- prop.test(x = successes, n = trials)
+      }, warning = function(w) {
+    # Code to handle warnings
+    warningCondition <- conditionMessage(w)
+    cat("Warning:", warningCondition, "\n")
+      })
+      # Prop test to test the differences between the number of No/Ca in that cluster
+      # Versus the total number of those samples from the organ
+      
+      df_organ[n] <- organ
+      df_cluster[n] <- clust
+      df_NT_inClust[n] <- NTc
+      df_CA_inClust[n] <- CAc
+      df_NT_total[n] <- NT
+      df_CA_total[n] <- CA
+      df_pcNT[n] <- NTc/NT
+      df_pcCA[n] <- CAc/CA
+      df_pval[n] <- res$p.value
+      
+      n <- n + 1
+    }
+  }  
+  df <- data.frame(Organ = df_organ, Cluster = df_cluster, NT_clust = df_NT_inClust, CA_clust = df_CA_inClust, NT_total = df_NT_total, CA_total = df_CA_total, NT_Proportion = df_pcNT, CA_Proportion = df_pcCA, p_value = df_pval)
+  df$adj_p_value <- p.adjust(df$p_value, method = "bonferroni")
+  return(df)
+}
+```
+
+```{r}
+Idents(seurat_object.colon) <- 'RNA_clusters'
+Idents(seurat_object.mlns) <- 'RNA_clusters'
+Idents(seurat_object.lung) <- 'RNA_clusters'
+df <- cluster_differences('RNA_clusters')
+
+
+#write.csv(df, "RNA_by_Organ_Candida_diff.csv")
+```
+
+By subsetting by organ first, we can see the significant levels of 
+
+```{r}
+df[df$adj_p_value < 0.05,]
+```
+
+```{r}
+#Colon Cluster 3
+#rev(sort(table(seurat_object.colon$Immgen.fine.RNA[seurat_object.colon$WNN_clusters_UMAP == 3])))
+rev(sort(table(seurat_object.colon$RNA_clusters[seurat_object.colon$RNA_clusters == 3])))
+
+# Lung Cluster 4
+#rev(sort(table(seurat_object.lung$Immgen.fine.RNA[seurat_object.lung$WNN_clusters_UMAP == 4])))
+rev(sort(table(seurat_object.lung$RNA_clusters[seurat_object.lung$RNA_clusters == 5])))
+```
+
+From our RNA clusters, only cluster 5 is the cluster with significant difference in Ca and Non-infection composition in multiple organs (colon and lung). 
+
+Looking here at which RNA-cluster these cells are apart of, you can see they are mostly in RNA cluster 5.
+
+Cluster 0 and 2 are significantly different in the colon, and are close to being significant in the lung. This is primarily due to the composition switch in Clusters 0 and 2 between the cells.
+
+
+# 5.A Cluster CA/NT Proportion Visual
+
+```{r}
+#library(reshape2)
+#df.long <- melt(df, id.vars=c("Organ", "Cluster"))
+library(tidyr)
+df.long <- df %>%
+  pivot_longer(cols = c(NT_Proportion, CA_Proportion),
+               names_to = "Proportion_Type",
+               values_to = "Proportion_Value")
+
+ggplot(df.long, aes(x = Cluster, y = Proportion_Value, fill = Organ)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~Proportion_Type, scales = "free_y") +
+  labs(x = "Cluster", y = "Proportion") +
+  theme_minimal()
+
+ggplot(df.long, aes(x = Proportion_Type, y = Proportion_Value, fill = Organ)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~Cluster, scales = "free_y") +
+  labs(x = "Cluster", y = "Proportion")
+
+my_comparisons <- list(c("NT_Proportion", "CA_Proportion"))
+
+ggplot(df.long, aes(x = Organ, y = Proportion_Value, fill = Proportion_Type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~Cluster, scales = "free_y") +
+  labs(x = "Cluster", y = "Proportion") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(legend.position = "top") + stat_compare_means(comparisons = my_comparisons, method = "wilcox.test", label =  "p.signif", paired = FALSE) #+ ylim(0,0.5)
+```
+
+Here, NT Proportion and CA proportion, are showing for each organ, what percentage of all Infected cells are in that cluster, and what percentage of all non-Infected cells are in that cluster.
+
+Therefore the number for cluster 0 for colon =  the number of colon cells infected in cluster 0 / the number of colon cells infected in total The number of colon cells infected in cluster 0 is the number of successes, while the number of colon cells infected in total is the number of trials.
+
+Then the prop.test is the the number of colon cells infected in cluster 0 / the number of colon cells infected in total and the number of colon cells non-infected in cluster 0 / the number of colon cells not infected in total
+
+Significant diff # of infected and non-infected in each organ by RNA_cluster shown below
+```
+df[df$adj_p_value < 0.05,]
+```
+
+```{r}
+temp <- as.data.frame(melt(df))
+temp <- temp[temp$variable %in% c("NT_Proportion", "CA_Proportion"),]
+```
+
+```{r}
+my_comparisons <- list(c("NT_Proportion", "CA_Proportion"))
+
+ggplot(temp, aes(x = Organ, y = value, color = variable)) +
+  geom_boxplot() +
+  labs(
+    x = "Cluster",
+    y = "Frequency",
+    title = "Boxplot of Frequency by Cluster and Condition"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + facet_grid(. ~ Cluster) +
+  theme(legend.position = "top") + stat_compare_means(comparisons = my_comparisons, method = "t.test", label =  "p.signif", paired = FALSE) + ylim(0,0.5)
+```
+
+```{r}
+temp <- na.omit(temp)
+
+# Create the plot
+ggplot(temp, aes(x = Organ, y = value, color = variable)) +
+  geom_boxplot() +
+  labs(
+    x = "Cluster",
+    y = "Frequency",
+    title = "Boxplot of Frequency by Cluster and Condition"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_grid(. ~ Cluster) +
+  theme(legend.position = "top") +
+  stat_compare_means(
+    comparisons = list(c("CA_Proportion", "NT_Proportion")),
+    method = "wilcox.test", # You can choose a different statistical test
+    method.args = list(alternative = "two.sided"),
+    label = "p.format"
+  )
+```
+
+RNA_cluster 5 - Dr. Iliev was primarily concerned with cluster 5, based on the statistically different cell counts in Candida mice vs non-Infected mice for colon and lung samples.
+
+# 6. Top 5 Genes for Cluster
+```
+# Find markers for all RNA clusters
+
+Idents(seurat_object) <- "RNA_clusters"
+DefaultAssay(object = seurat_object) <- "RNA"
+
+seurat_object.RNAmarkers <- FindAllMarkers(seurat_object, only.pos = TRUE, min.pct = 0.10, logfc.threshold = 0.25)
+
+saveRDS(seurat_object.RNAmarkers, file = paste0(data_dir,"/migratory_T_cell_cluster_dge.rds"), ascii = FALSE, version = NULL,
+        compress = TRUE, refhook = NULL)
+
+# Extract Top Genes
+result <- seurat_object.RNAmarkers %>%
+  arrange(cluster, p_val_adj) %>%
+  group_by(cluster) %>% slice_head(n=5)
+
+migratory_t_cell_top_5_df <- Extract_Top_Markers(marker_dataframe = seurat_object.RNAmarkers, num_genes = 5, data_frame = TRUE,
+    rank_by = "avg_log2FC", named_vector = FALSE, make_unique = TRUE)
+
+saveRDS(migratory_t_cell_top_5_df, file = paste0(data_dir,"/migratory_T_cell_cluster_top5_genes.rds"), ascii = FALSE, version = NULL,
+        compress = TRUE, refhook = NULL)
+```
+
+```{r}
+migratory_t_cell_marker_v2 <- readRDS(paste0(data_dir,"/migratory_T_cell_cluster_dge.rds"))
+migratory_t_cell_top_5_df <- readRDS(paste0(data_dir,"/migratory_T_cell_cluster_top5_genes.rds"))
+```
+
+```{r}
+DefaultAssay(seurat_object) <- "RNA"
+Idents(object = seurat_object) <- "RNA_clusters"
+Clustered_DotPlot(seurat_object, features = c(unique(migratory_t_cell_top_5_df$gene), "Cd4", "Sell", "Il17a")) #+ coord_flip()
+
+DefaultAssay(seurat_object) <- "RNA"
+seurat_object <- ScaleData(seurat_object, features = rownames(seurat_object))
+DoHeatmap(seurat_object, features = c(unique(migratory_t_cell_top_5_df$gene), "Cd4", "Sell")) #+ coord_flip()
+
+DoHeatmap(seurat_object, features = c(unique(migratoryt_cell_marker_v2$gene[migratory_t_cell_marker_v2$cluster == 5]), "Cd4", "Sell")) #+ coord_flip()
+
+```
+
+# 7. Clusters by Description Genes / Markers
+
+```{r}
+Global_T <- c("Cd3e","Cd3d","Cd8a","Cd4")
+Th17 <- c("Rora", "Klrb1","Ctsh","Il26","Il17a","Il17f","Ccr6", "Il23r", "Il22")
+Tfh_Th1_Th2_Th17 <- c("Cd200","Ptpn13","Btla","Tbx21","Gata3","Cd40lg","Il7a", "Il2")
+Tregs <- c("Foxp3","Il2ra","Ctla4","Ikzf2")
+Naive <- c("Il7r","Ccr7","Tcf7","Sell","Lef1")
+Memory <- c("Eomes","Gzmk","Cxcr3")
+Effector_Memory <- c("Fgfbp2","Klrd1")
+Activated <- c("Tnf","Ifng","Fos","Jun")
+Exhausted_activated <- c("Lag3","Havcr2","Pdcd1")
+Exhausted <- c("Gzmb","Entpd1","Itgae")
+NK <- c("Tyrobp","Ncam1","Cd160", "Nkg7")
+
+#Th17 <- c("Il17a","Il17f","Ccr6", "Rorc")
+#Tfh <- c("Cxcr5", "Bcl6", "Cxcr3", "Pdcd1","Cd40lg")
+#NK <- c("Tyrobp","Ncam1","Cd160","Gnly", "Nkg7","Klrb1a", "Gzma", "Cxcr6")
+
+All_genes <- list(Global_T,Th17,Tfh_Th1_Th2_Th17,Tregs,Naive,Memory,Effector_Memory,Activated,Exhausted_activated,Exhausted, NK)
+names(All_genes) <- c("Global_T","Th17","Tfh_Th1_Th2_Th17","Tregs","Naive","Memory","Effector_Memory","Activated","Exhausted_activated","Exhausted", "NK")
+
+DefaultAssay(seurat_object) <- "RNA"
+Idents(object = seurat_object) <- "RNA_clusters"
+marker_dotplot <- lapply(names(All_genes), function(x) {
+  DotPlot(
+    seurat_object, 
+    features = All_genes[[x]], 
+    scale = TRUE, 
+    col.min = 0, 
+    col.max = 5, 
+    group.by = "RNA_clusters"
+  ) + RotatedAxis() + labs(title = x) + NoLegend()
+})
+
+library(gridExtra)
+grid.arrange(grobs = marker_dotplot, nrow = 2)
+```
+
+Comments- 
+https://www.nature.com/articles/s41598-018-35161-5
+AverageExpression(seurat_object, features = c("Tbx21", "Ifng", ), group.by = "RNA_clusters")
+Tbx21 is very high in the cluster 16 ()
+Ifng is high in cluster 13 (Th1)
+Rorc is high in cluster 12
+Il10 is very high in cluster 9
+
+
+
+https://perspectivesinmedicine.cshlp.org/content/5/3/a019612
+
+## 7.A Annotate Clusters based on Markers
+
+```
+Idents(object = seurat_object) <- "RNA_clusters"
+
+seurat_object <- RenameIdents(seurat_object,
+                              `0` = 'Naive CD4 - Lung',
+                              `1` = 'Naive CD8 - Lung',
+                              `2` = 'Naive CD8 - mLns',
+                              `3` = 'Naive CD4 - mLns', 
+                              `4` = 'CD8 Eff Mem - Colon',
+                              `5` = 'Th-17',
+                              `6` = 'NK Ccl5',
+                              `7` = 'Treg Tnfrsf4',
+                              `8` = 'Cluster 8',
+                              `9` = 'Treg Tnfrsf4',
+                              `10` = 'CD8 Ly6c2',
+                              `11` = 'Cluster 11',
+                              `12` = 'NK Tmem/Il17r',
+                              `13` = 'Gzma Memory T - Lung',
+                              `14` = 'CD8 Isg15 - mLns',
+                              `15` = 'Naive Lef1 - mLns',
+                              `16` = 'Gzma Exhausted - Lung')
+
+seurat_object[["RNA_clust_annot"]] <- as.factor(Idents(seurat_object))
+
+DimPlot(seurat_object, reduction = "umap_rna", group.by = "RNA_clust_annot", label = TRUE)
+```
+
+```{r}
+Idents(object = seurat_object) <- "RNA_clusters"
+
+seurat_object <- RenameIdents(seurat_object,
+                              `0` = 'Naive CD4',
+                              `1` = 'Naive CD8',
+                              `2` = 'Naive CD8',
+                              `3` = 'Naive CD4', 
+                              `4` = 'CD8 Eff Mem - Colon',
+                              `5` = 'Th-17',
+                              `6` = 'NK Ccl5',
+                              `7` = 'Treg Tnfrsf4',
+                              `8` = 'Cluster 8',
+                              `9` = 'Treg Tnfrsf4',
+                              `10` = 'CD8 Ly6c2',
+                              `11` = 'Cluster 11',
+                              `12` = 'NK Tmem/Il17r',
+                              `13` = 'Gzma Memory T - Lung',
+                              `14` = 'CD8 Isg15 - mLns',
+                              `15` = 'Naive Lef1 - mLns',
+                              `16` = 'Gzma Exhausted - Lung')
+
+seurat_object[["RNA_clust_annot"]] <- as.factor(Idents(seurat_object))
+
+DimPlot(seurat_object, reduction = "umap_rna", group.by = "RNA_clust_annot", label = TRUE)
+```
+
+# 8. CytoTrace
+```{r}
+library(CytoTRACE)
+data_tmp <- as.matrix(GetAssayData(object = seurat_object , slot = "counts", assay="RNA"))
+results <- CytoTRACE(data_tmp, subsamplesize = 1000)
+phenotype = as.character(seurat_object$RNA_clust_annot)
+names(phenotype) <- rownames(seurat_object[[]])
+plotCytoTRACE(results, phenotype = phenotype, emb=seurat_object[["umap_rna"]]@cell.embeddings)
+```
+
+Other Visualization by Mouse and Organ
+
+Before with the proportions, I was checking the amount of cells within each cluster, with or without infection, divided by the 
+
+```{r}
+seurat_object.colon <- subset(x = seurat_object, subset = (Organ == "Colon"))
+seurat_object.lung <- subset(x = seurat_object, subset = (Organ == "Lung"))
+seurat_object.mlns <- subset(x = seurat_object, subset = (Organ == "mLns"))
+```
+
+```{r}
+#Colon
+colon_mouse_cell_freq <- as.data.frame(table(seurat_object.colon$Mouse_New, seurat_object.colon$RNA_clust_annot))
+colnames(colon_mouse_cell_freq) <- c("Mouse", "Cell_Type", "Frequency")
+# Lung
+lung_mouse_cell_freq <- as.data.frame(table(seurat_object.lung$Mouse_New, seurat_object.lung$RNA_clust_annot))
+colnames(lung_mouse_cell_freq) <- c("Mouse", "Cell_Type", "Frequency")
+#mLns
+mlns_mouse_cell_freq <- as.data.frame(table(seurat_object.mlns$Mouse_New, seurat_object.mlns$RNA_clust_annot))
+colnames(mlns_mouse_cell_freq) <- c("Mouse", "Cell_Type", "Frequency")
+
+mice <- unique(seurat_object$Mouse_New)
+
+for (mouse in mice){
+  colon_mouse_cell_freq$Freq_Perc[colon_mouse_cell_freq$Mouse == mouse] <- colon_mouse_cell_freq$Frequency[colon_mouse_cell_freq$Mouse == mouse] / sum(seurat_object.colon$Mouse_New == mouse)
+  
+  lung_mouse_cell_freq$Freq_Perc[lung_mouse_cell_freq$Mouse == mouse] <- lung_mouse_cell_freq$Frequency[lung_mouse_cell_freq$Mouse == mouse] / sum(seurat_object.lung$Mouse_New == mouse)
+  
+  mlns_mouse_cell_freq$Freq_Perc[mlns_mouse_cell_freq$Mouse == mouse] <- mlns_mouse_cell_freq$Frequency[mlns_mouse_cell_freq$Mouse == mouse] / sum(seurat_object.mlns$Mouse_New == mouse)
+}
+```
+
+```{r}
+lung_mouse_cell_freq$Mouse <- factor(lung_mouse_cell_freq$Mouse)
+colon_mouse_cell_freq$Mouse <- factor(colon_mouse_cell_freq$Mouse)
+mlns_mouse_cell_freq$Mouse <- factor(mlns_mouse_cell_freq$Mouse)
+
+# Create the stacked barplot using ggplot2 and facet by 'Mouse'
+p1 <- ggplot(lung_mouse_cell_freq, aes(x = Cell_Type, y = Freq_Perc, fill = Cell_Type)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = NULL, y = "Proportion") + #coord_flip() +
+  facet_wrap(~Mouse) + 
+  theme(axis.text.y = element_text(angle = 0, hjust = 0.5), legend.position="none", axis.text.x=element_blank()) + ggtitle("Lung Cell Type Frequency by Mouse")
+
+#legend.position="top"
+
+p2 <- ggplot(colon_mouse_cell_freq, aes(x = Cell_Type, y = Freq_Perc, fill = Cell_Type)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = NULL, y = "Proportion") + #coord_flip() +
+  facet_wrap(~Mouse) + 
+  theme(axis.text.y = element_text(angle = 0, hjust = 0.5), legend.position="none", axis.text.x=element_blank()) + ggtitle("Colon Cell Type Frequency by Mouse")
+
+p3 <- ggplot(mlns_mouse_cell_freq, aes(x = Cell_Type, y = Freq_Perc, fill = Cell_Type)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = NULL, y = "Proportion") + #coord_flip() +
+  facet_wrap(~Mouse) + 
+  theme(axis.text.x = element_text(angle = 65, hjust = 0.5), legend.position="none") + ggtitle("mlns Cell Type Frequency by Mouse")
+
+
+#ggplot(lung_mouse_cell_freq, aes(x = Mouse, y = Freq_Perc, fill = Cell_Type)) +
+#  geom_bar(stat = "identity", position = "stack") +
+#  labs(x = NULL, y = "Proportion") +
+#  #facet_wrap(~Mouse) + 
+#  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle("Lung Cell Type Frequency by Mouse")
+```
+
+```{r, fig.height = 10}
+#p1 + p2 + p3
+plist <- list(p1,p2,p3)
+grid.arrange(grobs = plist, nrow = 3)
+```
+
+Some interesting findings from this:
+
+There is barely any NK CCl5 or Treg in the mouse0080, non-infected male, in the Lung, while there is a very high proportion in both of the others.
+
+Gzma Memory T (Cluster 13) is not found in the mouse0082 at all.
+
+
+
+
+## CytoTRACE
+```{r}
+library(CytoTRACE)
+data_tmp <- as.matrix(GetAssayData(object = seurat_object, slot = "counts", assay="RNA"))
+results <- CytoTRACE(data_tmp, subsamplesize = 1000)
+phenotype = as.character(seurat_object$RNA_clust_annot)
+names(phenotype) <- rownames(seurat_object[[]])
+plotCytoTRACE(results, phenotype = phenotype, emb=seurat_object[["umap_rna"]]@cell.embeddings)
+
+plotCytoTRACE(results, phenotype = phenotype, emb=seurat_object[["umap_rna"]]@cell.embeddings, gene = "Sell")
+```
+
+# Monocle3
+```{r}
+#devtools::install_github("satijalab/seurat-wrappers")
+library(monocle3)
+```
+
+```{r}
+DefaultAssay(seurat_object) <- "RNA"
+
+seurat_object.colon <- subset(x = seurat_object, subset = (Organ == "Colon"))
+seurat_object.lung <- subset(x = seurat_object, subset = (Organ == "Lung"))
+seurat_object.mlns <- subset(x = seurat_object, subset = (Organ == "mLns"))
+```
+
+Here, I'm dividing the clusters with a higher resolution. Here, we are hoping to get the cluster 
+```{r}
+cds <- SeuratWrappers::as.cell_data_set(seurat_object.mlns)
+
+cds
+# colData(cds) # Metadata here
+#fData(cds) # Gene Metadata (empty)
+#rownames(fData(cds)) # Gene names
+# counts(cds) # Gives counts
+fData(cds)$gene_short_name <- rownames(fData(cds)) # Requires short names
+#fData(cds)$gene_short_name <- rownames(cds) # Requires short names
+
+
+recreate.partition <- c(rep(1,length(cds@colData@rownames)))
+names(recreate.partition) <- cds@colData@rownames
+recreate.partition <- as.factor(recreate.partition)
+
+cds@clusters$UMAP$partitions <- recreate.partition
+
+RNA_clusters <- seurat_object.mlns$RNA_clust_annot
+
+cds@clusters$UMAP$clusters <- RNA_clusters
+
+# Assign UMAP coordinate - cell embeddings
+
+cds@int_colData@listData$reducedDims$UMAP<- seurat_object.mlns@reductions$umap_rna@cell.embeddings
+
+pData(cds)$sample_name <- NULL
+
+cluster.before.trajectory <- plot_cells(cds, color_cells_by = "cluster", label_groups_by_cluster = FALSE, group_label_size = 5) +
+  theme(legend.position = "right")
+
+cds <- learn_graph(cds, use_partition = FALSE)
+
+plot_cells(cds,
+           color_cells_by = "cluster",
+           label_groups_by_cluster = FALSE,
+           label_branch_points = FALSE,
+           label_roots = FALSE,
+           label_leaves = FALSE,
+           group_label_size = 5)
+```
+
+Ordering by pseudotime - not sure what to make the root cells
+```{r}
+#cds <- order_cells(cds, reduction_method = "UMAP", root_cells = colnames(cds[,clusters(cds) %in% c("Naive CD4", "Naive CD8")]))
+#cds@clusters@listData[["UMAP"]][["clusters"]] %in% c("Naive CD4", "Naive CD8")
+cds <- order_cells(cds, reduction_method = "UMAP", root_cells = cds@colData@rownames[cds@clusters@listData[["UMAP"]][["clusters"]] %in% c("Naive CD4", "Naive CD8")])
+# I would want to use wnn.UMAP, but gives an error
+
+plot_cells(cds,
+           color_cells_by = "pseudotime",
+           label_groups_by_cluster = FALSE,
+           label_branch_points = FALSE,
+           label_roots = FALSE,
+           label_leaves = FALSE,
+           group_label_size = 5)
+
+cds$monocle3_pseudotime <- pseudotime(cds)
+data.pseudo <- as.data.frame(colData(cds))
+#ggplot(data.pseudo, aes(monocle3_pseudotime, WNN_clusters_PCA, fill = WNN_clusters_PCA)) + geom_boxplot()
+#ggplot(data.pseudo, aes(monocle3_pseudotime, Immgen.main.RNA, fill = Immgen.main.RNA)) + geom_boxplot()
+ggplot(data.pseudo, aes(monocle3_pseudotime, RNA_clust_annot, fill = RNA_clust_annot)) + geom_boxplot()
+```
+
+
+# Save the Rds
+```{r}
+#setwd(data_dir)
+saveRDS(seurat_object, file = "dataset_post_sc_Analysis.rds")
+```

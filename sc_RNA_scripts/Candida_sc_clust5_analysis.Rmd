@@ -1,0 +1,247 @@
+---
+title: "Candida_sc_clust5"
+author: "Nathan Morris"
+date: "2023-11-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Cluster 5 Analysis
+
+### Data Import
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+# Data Import
+library(Seurat)
+library(scater)
+library(dplyr)
+library(SingleR)
+library(celldex)
+library(scRNAseq)
+library(scran)
+library(gridExtra)
+library(pheatmap)
+library(ess)
+
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data"
+setwd(data_dir)
+```
+
+```{r eval=FALSE}
+seurat_object <- readRDS("dataset_post_sc_Analysis.Rds")
+```
+
+# Cluster 5 - Identifying and Visualizing Markers in all organs
+
+```{r}
+# Find all markers of cluster 5 against all
+Idents(seurat_object) <- "RNA_clusters"
+cluster5.markers <- FindMarkers(seurat_object, ident.1 = 5, only.pos = TRUE, min.pct = 0.05, logfc.threshold = 0.05)
+#head(cluster5.markers, n = 5)
+```
+
+```{r}
+#markers <- seurat_object.RNAmarkers[seurat_object.RNAmarkers$cluster == 5,]
+DefaultAssay(object = seurat_object) <- "RNA"
+markers <- cluster5.markers[order(cluster5.markers$p_val_adj), ]
+markers <- markers[(markers$p_val_adj > 0),]
+
+marker_genes <- rownames(markers[1:8,])
+marker_genes <- marker_genes[!is.na(marker_genes)]
+
+more_marker_genes <- rownames(markers[1:50,])
+more_marker_genes <- more_marker_genes[!is.na(more_marker_genes)]
+
+FeaturePlot(seurat_object, features = marker_genes, ncol = 4, reduction = "umap_rna")
+
+FeaturePlot(seurat_object, features = marker_genes[1:2], ncol = 2, reduction = "umap_rna", split.by = "Infection")
+  
+DoHeatmap(seurat_object, features = more_marker_genes, raster = FALSE) + NoLegend()
+  
+#ggsave(paste("Cluster-5", "_Top50_Markers_Heatmap.pdf", sep = ""), width=16, height=16)
+
+DotPlot(seurat_object, features = more_marker_genes) + RotatedAxis() + coord_flip()
+```
+
+This shows that cluster 4 and cluster 7 are very similar in many marker genes.
+
+Also some of the genes of interest, like Il17a, Tmem176a and Ccr6 are very important in the distinction of cluster 5 from other clusters.
+
+# Cluster 5 Organ and Infection Distribution
+```{r}
+table(seurat_object$Organ[which(seurat_object$RNA_clusters == 5)])
+table(seurat_object$Infection[which(seurat_object$RNA_clusters == 5)])
+```
+
+Cluster 5 mainly consists of Colon and Lung samples. It also shows a significant difference between No and Candida infected samples.
+
+# Cluster 5 Cell types distribution
+```{r}
+head(rev(sort(table(seurat_object$Immgen.fine.RNA[which(seurat_object$RNA_clusters == 5)]))))
+#seurat_object <- RenameIdents(seurat_object, `T cells (T.4MEM49D+11A+.D30.LCMV)` = "T cells (CD5+ Sca1+)")
+```
+
+# Cluster 5 - Finding Markers between Candida and Non-Candida for all Organs
+
+```{r}
+seurat_object.sub <- subset(x = seurat_object, subset = (RNA_clusters == 5))
+
+Idents(object = seurat_object.sub) <- "Infection"
+
+Candida_cluster5.markers <- FindMarkers(seurat_object.sub, ident.1 = "Ca", only.pos = TRUE)
+```
+
+# Cluster 5 - Finding Markers between Candida and Non-Candida for each Organ
+
+```{r}
+organs <- c(unique(seurat_object$Organ))
+
+for (i in organs){
+  Idents(object = seurat_object) <- "RNA_clusters"
+  DefaultAssay(seurat_object) <- "RNA"
+  seurat_object.sub <- subset(x = seurat_object, subset = (RNA_clusters == 5))
+  seurat_object.organ <- subset(x = seurat_object.sub, subset = (Organ == i))
+  
+  Idents(object = seurat_object.organ) <- "Infection"
+  
+  DefaultAssay(seurat_object.organ) <- "RNA"
+  Candida_cluster5.markers_per_organ <- FindMarkers(seurat_object.organ, ident.1 = "Ca", only.pos = TRUE, test.use = "DESeq2")
+  
+  write.csv(Candida_cluster4.markers_per_organ, paste(i, "_CA_RNA_Markers.csv", sep = ""))
+}
+```
+
+# Cluster 5 Marker Plots
+
+```{r}
+#marker_genes
+#more_marker_genes
+for (i in organs){
+  Idents(object = seurat_object) <- "RNA_clusters"
+  
+  DefaultAssay(seurat_object) <- "RNA"
+  
+  seurat_object.sub <- subset(x = seurat_object, subset = (Organ == i))
+  
+  FeaturePlot(seurat_object.sub, features = marker_genes, ncol = 2, reduction = "umap_rna")
+
+  #ggsave(paste(i, "_RNA-5_Markers_UMAP.pdf", sep = ""), width=8, height=12)
+  
+  FeaturePlot(seurat_object.sub, features = marker_genes, split.by = "Infection", reduction = "umap_rna")
+  
+  #ggsave(paste("split_Infection_", i, "_RNA-5_Markers_UMAP.pdf", sep = ""), width=8, height=18)
+  
+  DoHeatmap(seurat_object.sub, features = more_marker_genes, raster = FALSE)
+  
+  #ggsave(paste(i, "_RNA-5_Markers_Heatmap.pdf", sep = ""), width=16, height=16)
+}
+```
+
+# Increasing RNA clustering resolution to split Cluster 5
+Here, I'm trying to re-run the analysis from the Commands section of the seurat object in order to change the resolution and check cluster stability:
+```{r}
+set.seed(42)
+DefaultAssay(seurat_object.lung) <- "RNA"
+DefaultAssay(seurat_object.colon) <- "RNA"
+# seurat_object.lung, seurat_object.mlns, seurat_object.colon
+
+seurat_object.lung <- NormalizeData(object = seurat_object.lung)
+seurat_object.lung <- FindVariableFeatures(object = seurat_object.lung)
+seurat_object.lung <- ScaleData(object = seurat_object.lung)
+seurat_object.lung <- RunPCA(object = seurat_object.lung)
+seurat_object.lung <- FindNeighbors(object = seurat_object.lung)
+seurat_object.lung <- FindClusters(object = seurat_object.lung, resolution = c(2.5))
+
+seurat_object.colon <- NormalizeData(object = seurat_object.colon)
+seurat_object.colon <- FindVariableFeatures(object = seurat_object.colon)
+seurat_object.colon <- ScaleData(object = seurat_object.colon)
+seurat_object.colon <- RunPCA(object = seurat_object.colon)
+seurat_object.colon <- FindNeighbors(object = seurat_object.colon)
+seurat_object.colon <- FindClusters(object = seurat_object.colon, resolution = c(2.5))
+```
+
+# Cluster Similarity between RNA Clusters and Cluster 5 Split Clusters
+
+Lung
+```{r}
+cluster_matrix <- as.matrix(table(seurat_object.lung$RNA_clusters, seurat_object.lung$RNA_snn_res.2.5))
+
+rownames(cluster_matrix) <- paste("RNA", rownames(cluster_matrix))
+colnames(cluster_matrix) <- paste("Split", colnames(cluster_matrix))
+
+# Create heatmap
+pheatmap(cluster_matrix, 
+        #col = colorRampPalette(c("yellow", "blue"))(20),
+        main = "Lung Cluster Similarity Heatmap between RNA and RNA 2.5 Resolution")
+        #labels_row = make_bold_names(cluster_matrix, rownames, c("WNN 4")),
+        #labels_col = make_bold_names(cluster_matrix, colnames, c("RNA 5")))
+        #xlab = "RNA Clusters",
+        #ylab = "WNN Clusters")
+```
+
+Based on this graph, RNA 5 is split into clusters 13, 16 and 17 for lung.
+
+Colon
+```{r}
+cluster_matrix <- as.matrix(table(seurat_object.colon$RNA_clusters, seurat_object.colon$RNA_snn_res.2.5))
+
+rownames(cluster_matrix) <- paste("RNA", rownames(cluster_matrix))
+colnames(cluster_matrix) <- paste("Split", colnames(cluster_matrix))
+
+# Create heatmap
+pheatmap(cluster_matrix, 
+        #col = colorRampPalette(c("yellow", "blue"))(20),
+        main = "Colon Cluster Similarity Heatmap between RNA and RNA 2.5 Resolution")
+        #labels_row = make_bold_names(cluster_matrix, rownames, c("WNN 4")),
+        #labels_col = make_bold_names(cluster_matrix, colnames, c("RNA 5")))
+        #xlab = "RNA Clusters",
+        #ylab = "WNN Clusters")
+```
+
+Based on this graph, RNA 5 is split into clusters 13 and 14 for colon.
+
+```{r}
+Idents(object = seurat_object.lung) <- "RNA_snn_res.2.5"
+Idents(object = seurat_object.colon) <- "RNA_snn_res.2.5"
+
+DimPlot(seurat_object.lung, reduction = "umap_rna", label = TRUE, repel = TRUE) + ggtitle("Lung Split 5 Clusters")
+
+DotPlot(seurat_object.lung, features = c(stem_like_gois, activation_like_gois)) + RotatedAxis() + ggtitle("Lung Split 5 Clusters by Stem and Activation Markers")
+
+DimPlot(seurat_object.colon, reduction = "umap_rna", label = TRUE, repel = TRUE) + ggtitle("Colon Split 5 Clusters")
+
+DotPlot(seurat_object.colon, features = c(stem_like_gois, activation_like_gois)) + RotatedAxis() + ggtitle("Colon Split 5 Clusters by Stem and Activation Markers")
+
+#stem_like_gois <- c("Ccr7", "Il7r", "Sell", "Tcf7", "Tcf1", "Slamf6", "Klf3", "Il16ra")
+#activation_like_gois <- c("Cd44", "Cd69", "Il17a", "Il17f", "Il22", "Ifng", "Mki67", "Csf2")
+```
+For the Lung, we are primarily focused on clusters 13, 16 and 17. 
+13 has higher levels of Ccr7, Sell, Slamf6, which implies it's the stem-like cluster
+16 has higher levels of Cd44 and some Il17a, which implies it's the activation-like cluster
+17 has higher levels of Il17a and Il17f, which implies it's the activation-like cluster
+
+For the Lung, we are primarily focused on clusters 13, and 14. 
+13 has higher levels of Il17a, Cd44, and Il17f, which implies it's the activation-like cluster. But it has Il17r also at higher levels
+14 doesn't really have higher expression levels in any gene of interest.
+
+```{r}
+cluster.5.split.markers.lung.stem <- FindMarkers(seurat_object.lung, ident.1 = 13, ident.2 = 16, only.pos = TRUE)
+cluster.5.split.markers.lung.gen <- FindMarkers(seurat_object.lung, ident.1 = 16, ident.2 = 13, only.pos = TRUE)
+cluster.5.split.markers.colon.stem <- FindMarkers(seurat_object.colon, ident.1 = 14, ident.2 = 13, only.pos = TRUE)
+cluster.5.split.markers.colon.gen <- FindMarkers(seurat_object.colon, ident.1 = 13, ident.2 = 14, only.pos = TRUE)
+```
+
+# Genes of Interest when splitting cluster 5:
+```{r}
+cluster.5.split.markers.lung.stem[row.names(cluster.5.split.markers.lung.stem) %in% stem_like_gois,]
+cluster.5.split.markers.lung.gen[row.names(cluster.5.split.markers.lung.gen) %in% activation_like_gois, ]
+
+cluster.5.split.markers.colon.stem[row.names(cluster.5.split.markers.colon.stem) %in% stem_like_gois, ]
+cluster.5.split.markers.colon.gen[row.names(cluster.5.split.markers.colon.gen) %in% activation_like_gois, ]
+```
+
+Could also make a seurat object with only cluster 5 cells instead
+
+

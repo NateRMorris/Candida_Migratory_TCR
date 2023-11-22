@@ -1,0 +1,563 @@
+---
+title: "Candida_tcr_diversity"
+author: "Nathan Morris"
+date: "2023-10-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Directory Set Up
+
+```{r}
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+```
+
+```{r}
+seurat_object_prefiltered <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT.Rds"))
+
+#seurat_object_WNN <- readRDS("Candida_ds_clean_WNN.rds") # I didn't include WNN analysis in this document
+#seurat_object <- readRDS(file = paste0(data_dir, "dataset_post_sc_Analysis.rds")) #If you want without WNN Clusters and without TCR Information
+
+seurat_object_pseudo <- readRDS(file = paste0(data_dir, "pseudotime_seurat.rds"))
+```
+
+And we get the object containing our filtered TCR data
+```{r}
+IGT27_TCR <- read.table("/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/IGT27_for_analysis.tsv", header = TRUE, sep = "\t")
+```
+
+Load the directory with TCR Information, so re-run isn't necessary
+
+# Load Packages
+
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+library(ggplot2)
+library(Seurat)
+library(tibble)
+library(dplyr)
+library(pheatmap)
+library(tidyr)
+library(usedist)
+library(ggvenn)
+library(stringdist)
+library(patchwork)
+library(djvdj)
+library(data.table)
+```
+
+# Total Number of Clonotypes
+
+```{r}
+clonotype_per_sample <- table(IGT27_TCR$clonotype, IGT27_TCR$Sample)
+clonotype_per_sample["Total Number of Clonotypes"]
+```
+
+# 6. Gini Index Calculation
+
+## 6.A Gini Index without Downsampling
+
+Previously, I used the pairwise distance calculations for the gini index. However, here I am just taking a list of each clonotype's abundance, and checking the gini index using this.
+
+Therefore, we are looking at how evenly distributed the clonotypes are in each mouse, for each organ and cluster.
+
+However, there are a few different things that we can base on our clonotypes. We can base it on:
+1. Clonotype ID from IGT27_TCR
+2. Beta from IGT27_TCR
+2. CDR3 from so_vdj
+3. Gearty new clonoID with so_vdj
+
+Here, I'm setting up the dataframes for the so_vdj calculations.
+
+```{r}
+#mouse_combined # This is the Gearty clono.ID_new that we want
+gearty_ids <- cbind(cell_barcode = c(mouse_combined$Barcode), clono.id_new = c(mouse_combined$clono.ID_new))
+so_vdj@meta.data <- merge(so_vdj@meta.data, gearty_ids, by.x = "barcode", by.y = "cell_barcode", all.x = TRUE)
+```
+
+Next, I input the gini calculation formula. This formula takes a vector, and 
+
+```{r}
+gini <- function(x) {
+  total <- 0
+  sorted_x <- sort(x)
+  for (i in 1:(length(sorted_x) - 1)) {
+    total <- total + sum(abs(sorted_x[i] - sorted_x[(i + 1):length(sorted_x)]))
+  }
+  return(total / (length(sorted_x)^2 * mean(sorted_x)))
+}
+```
+
+Now, I want to find the gini index, for each mouse, for each cluster without downsampling.
+
+```{r, results = "hide"}
+clusters <- sort(unique(IGT27_TCR$RNA_clusters))
+mice <- c("mouse0080", "mouse0081", "mouse0082")
+gini_indices_mouse <- matrix(nrow = length(mice), ncol = length(clusters))
+colnames(gini_indices_mouse) <- paste0("cluster_", sort(clusters))
+rownames(gini_indices_mouse) <- mice
+
+calc_gini <- so_vdj@meta.data[,c('cell_barcode', 'cdr3', 'clono.id_new', 'Mouse', 'Organ', 'RNA_clusters')]
+calc_gini <- calc_gini[!is.na(calc_gini$cdr3),]
+```
+
+Calculation without downsampling
+
+```{r}
+gini_indices_mouse_clonotype_list <- list()
+gini_indices_mouse_beta_list <- list()
+gini_indices_mouse_cdr3_list <- list()
+gini_indices_mouse_gearty_list <- list()
+
+gini_indices_mouse_downsample <- matrix(nrow = length(organs), ncol = length(clusters))
+colnames(gini_indices_mouse_downsample) <- paste0("cluster_", sort(clusters))
+rownames(gini_indices_mouse_downsample) <- organs
+
+gini_indices_mouse_downsample_empty <- gini_indices_mouse_downsample
+
+for (mouse in mice) {
+  # Refresh dataframe each mouse calculation
+  gini_indices_mouse_clonotype <- gini_indices_mouse_downsample
+  gini_indices_mouse_beta <- gini_indices_mouse_downsample
+  gini_indices_mouse_cdr3 <- gini_indices_mouse_downsample
+  gini_indices_mouse_gearty <- gini_indices_mouse_downsample
+    
+  # Subset dataframes by Mouse
+  IGT27_mouse <- IGT27_TCR[which(IGT27_TCR$Mouse == mouse),]
+  calc_gini_mouse <- calc_gini[which(calc_gini$Mouse == mouse),]
+
+  for (organ in organs) {
+    # Subset dataframes by Organ
+    IGT27_organ <- IGT27_mouse[which(IGT27_mouse$Organ == organ),]
+    calc_gini_organ <- calc_gini_mouse[which(calc_gini$Organ == organ),]
+    
+    for (cluster in clusters) {
+      # Subset by cluster
+      subset <- IGT27_organ[which(IGT27_organ$RNA_clusters == cluster),]
+      subset_calc <- calc_gini_organ[which(calc_gini_organ$RNA_clusters == cluster),]
+      
+      # Calculate Gini Based on each clonotype consideration
+      gini_clonotype <- gini(as.vector(table(subset$clonotype)))
+      gini_beta <- gini(as.vector(table(subset$AA.JUNCTION_beta)))
+      
+      gini_cdr3 <- gini(as.vector(table(subset_calc$cdr3)))
+      gini_gearty <- gini(as.vector(table(subset_calc$clono.id_new)))
+      
+      # Assign numbers to dataframe
+      gini_indices_mouse_clonotype[organ, paste0("cluster_",cluster)] <- gini_clonotype
+      gini_indices_mouse_beta[organ, paste0("cluster_",cluster)] <- gini_beta
+      
+      gini_indices_mouse_cdr3[organ, paste0("cluster_",cluster)] <- gini_cdr3
+      gini_indices_mouse_gearty[organ, paste0("cluster_",cluster)] <- gini_gearty
+  
+      # Assign dataframes to list
+      gini_indices_mouse_clonotype_list[[mouse]] <- gini_indices_mouse_clonotype
+      gini_indices_mouse_beta_list[[mouse]] <- gini_indices_mouse_beta
+      gini_indices_mouse_cdr3_list[[mouse]] <- gini_indices_mouse_cdr3 
+      gini_indices_mouse_gearty_list[[mouse]] <- gini_indices_mouse_gearty
+      }
+    }
+  }
+```
+
+## 6.B Gini Index with Downsampling
+
+For the Yeast IBD paper that Dr. Iliev sent, they actually use only 500 samples for each individual per fungal infection to determine the Gini index. Therefore, we should downsample as well to observe an equal number of cells from each sample. 
+
+```{r}
+length(which(IGT27_TCR$Mouse == "mouse0082"))
+length(which(IGT27_TCR$Mouse == "mouse0080"))
+length(which(IGT27_TCR$Mouse == "mouse0081"))
+```
+
+Here, I select 500 samples from each mouse, and then within each of these 500 samples from each mouse, the gini index is calculated for each cluster.
+
+For these, I decided to base the gini index on the AA sequence of the beta and the cdr3.
+
+```{r}
+gini_indices_mouse_downsample_clonotype_list <- list()
+gini_indices_mouse_downsample_beta_list <- list()
+gini_indices_mouse_downsample_cdr3_list <- list()
+gini_indices_mouse_downsample_gearty_list <- list()
+
+gini_indices_mouse_downsample_empty <- gini_indices_mouse_downsample
+
+for (mouse in mice) {
+  # Refresh dataframe each mouse calculation
+  gini_indices_mouse_downsample_clonotype <- gini_indices_mouse_downsample_empty
+  gini_indices_mouse_downsample_beta <- gini_indices_mouse_downsample_empty
+  gini_indices_mouse_downsample_cdr3 <- gini_indices_mouse_downsample_empty
+  gini_indices_mouse_downsample_gearty <- gini_indices_mouse_downsample_empty
+  
+  # Subset dataframes by Mouse
+  IGT27_mouse <- IGT27_TCR[which(IGT27_TCR$Mouse == mouse),]
+  calc_gini_mouse <- calc_gini[which(calc_gini$Mouse == mouse),]
+
+  for (organ in organs) {
+    # Subset dataframes by Organ
+    # Downsample 500 cells from each mouse for each organ
+    IGT27_organ <- IGT27_mouse[which(IGT27_mouse$Organ == organ),]
+    IGT27_organ_downsample <- IGT27_organ[sample(nrow(IGT27_organ), 500), ]
+    
+    calc_gini_organ <- calc_gini_mouse[which(calc_gini_mouse$Organ == organ),]
+    calc_gini_organ_downsample <- calc_gini_organ[sample(nrow(calc_gini_organ), 500),]
+    
+    for (cluster in clusters) {
+      # Subset by cluster
+      subset <- IGT27_organ_downsample[which(IGT27_organ_downsample$RNA_clusters == cluster),]
+      subset_calc <- calc_gini_organ_downsample[which(calc_gini_organ_downsample$RNA_clusters == cluster),]
+
+      # Calculate Gini Based on each clonotype consideration
+      gini_clonotype <- gini(as.vector(table(subset$clonotype)))
+      gini_beta <- gini(as.vector(table(subset$AA.JUNCTION_beta)))
+      
+      gini_cdr3 <- gini(as.vector(table(subset_calc$cdr3)))
+      gini_gearty <- gini(as.vector(table(subset_calc$clono.id_new)))
+      
+      # Assign numbers to dataframe
+      gini_indices_mouse_downsample_clonotype[organ, paste0("cluster_",cluster)] <- gini_clonotype
+      gini_indices_mouse_downsample_beta[organ, paste0("cluster_",cluster)] <- gini_beta
+      
+      gini_indices_mouse_downsample_cdr3[organ, paste0("cluster_",cluster)] <- gini_cdr3
+      gini_indices_mouse_downsample_gearty[organ, paste0("cluster_",cluster)] <- gini_gearty
+  
+      # Assign dataframes to list
+      gini_indices_mouse_downsample_clonotype_list[[mouse]] <- gini_indices_mouse_downsample_clonotype
+      gini_indices_mouse_downsample_beta_list[[mouse]] <- gini_indices_mouse_downsample_beta
+      gini_indices_mouse_downsample_cdr3_list[[mouse]] <- gini_indices_mouse_downsample_cdr3 
+      gini_indices_mouse_downsample_gearty_list[[mouse]] <- gini_indices_mouse_downsample_gearty
+      }
+    }
+  }
+```
+
+As we can see above, this downsampling didn't help our index. It is still below 0.1, and therefore there is near equal frequency between all clusters.
+
+```{r}
+# Define which Clonotype type to consider
+list_to_use <- gini_indices_mouse_downsample_clonotype_list
+#list_to_use <- gini_indices_mouse_downsample_beta_list
+#list_to_use <- gini_indices_mouse_downsample_cdr3_list # This one doesn't show anything
+#list_to_use <- gini_indices_mouse_downsample_gearty_list
+
+#list_to_use <- gini_indices_mouse_clonotype_list
+#list_to_use <- gini_indices_mouse_beta_list
+#list_to_use <- gini_indices_mouse_cdr3_list
+#list_to_use <- gini_indices_mouse_gearty_list
+
+data_long_0 <- as.data.frame(list_to_use$mouse0080) %>% 
+  rownames_to_column(var = "organ") %>% 
+  pivot_longer(cols = -organ, names_to = "cluster", values_to = "value")
+data_long_0 <- cbind(data_long_0, mouse = "mouse0080")
+data_long_0 <- cbind(data_long_0, infection = "Yes")
+
+data_long_1 <- as.data.frame(list_to_use$mouse0081) %>% 
+  rownames_to_column(var = "organ") %>% 
+  pivot_longer(cols = -organ, names_to = "cluster", values_to = "value")
+data_long_1 <- cbind(data_long_1, mouse = "mouse0081")
+data_long_1 <- cbind(data_long_1, infection = "Yes")
+
+data_long_2 <- as.data.frame(list_to_use$mouse0082) %>% 
+  rownames_to_column(var = "organ") %>% 
+  pivot_longer(cols = -organ, names_to = "cluster", values_to = "value")
+data_long_2 <- cbind(data_long_2, mouse = "mouse0082")
+data_long_2 <- cbind(data_long_2, infection = "No")
+
+df <- rbind(data_long_0, data_long_1, data_long_2)
+```
+
+```{r}
+colors <- c("Candida Infected Male" = "blue", "Candida Infected Female" = "purple", "No Infection Male" = "orange")
+
+df <- df %>%
+  mutate(Mouse_New = ifelse(mouse == "mouse0080", "Candida Infected Male", ifelse(mouse == "mouse0081", "Candida Infected Female", ifelse(mouse == "mouse0082", "No Infection Male", mouse))))
+
+gf <- df[!is.na(df$value),]
+
+ggplot(gf, aes(x = cluster, y = value, color = Mouse_New)) +
+  geom_point((aes(shape = organ, size = 1.5))) +
+  scale_color_manual(values = colors) +
+  labs(
+    x = "Cluster",
+    y = "Gini Index Value",
+    title = "Dotplot of Gini Index Values for each Mouse by Organ within Clusters") + 
+    #facet_wrap(~ mouse, scales = "free_x", ncol = 1) + # If I want to use this, change color = organ and rid of stuff in geom_point
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels by 45 degrees
+
+ggplot(df, aes(x = cluster, y = value, fill = Mouse_New)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_color_manual(values = colors) +
+  labs(x = "Cluster", y = "Gini Index Value", title = "Gini Index Values for each Mouse by Organ within Clusters", fill = "Mouse") + 
+    facet_wrap(~ organ, scales = "free_x", ncol = 1) + # If I want to use this, change color = organ and rid of stuff in geom_point
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels by 45 degrees
+
+ggplot(df, aes(x = cluster, y = value, fill = Mouse_New)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_color_manual(values = colors) +
+  labs(x = "Cluster", y = "Gini Index Value", title = "Gini Index Values for each Mouse by Organ within Clusters", fill = "Mouse") + 
+    facet_wrap(~ Mouse_New, scales = "free_x", ncol = 1) + # If I want to use this, change color = organ and rid of stuff in geom_point
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels by 45 degrees
+
+ggplot(df, aes(x = cluster, y = value, fill = organ)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_color_manual(values = colors) +
+  labs(x = "Cluster", y = "Gini Index Value", title = "Gini Index Values for each Mouse by Organ within Clusters", fill = "Organ") + 
+    facet_wrap(~ Mouse_New, scales = "free_x", ncol = 1) + # If I want to use this, change color = organ and rid of stuff in geom_point
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels by 45 degrees
+
+position_dodge2(
+  width = 0.1,
+  preserve = "total",
+  padding = 0.1,
+  reverse = FALSE
+)
+
+ggplot(df, aes(x = cluster, y = value, color = organ)) +
+  geom_point(stat = "identity", size = 1.5) +
+  #((aes(shape = organ, size = 1.5)))
+  labs(x = "Cluster", y = "Gini Index Value", title = "Dotplot of Gini Index Values for each Mouse by Organ within Clusters", fill = "Organ") + 
+    facet_wrap(~ Mouse_New, scales = "free_x", ncol = 1) + # If I want to use this, change color = organ and rid of stuff in geom_point
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels by 45 degrees
+
+# Create the stacked barplot with facets for each mouse
+#ggplot(df, aes(x = cluster, y = value, fill = cluster)) +
+#  geom_bar(stat = "identity", position = "stack") +
+#  labs(x = "Cluster", y = "Value") +
+#  facet_wrap(~ mouse, scales = "free_x", ncol = 1) +
+#  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Many of the clusters have a 0 gini index. The Gini index computation is 0 when all TCR clonotypes have the same abundance (vector of clonotype frequencies is all 1s). The Gini index is NA when there are no TCRs within that mouse/organ/cluster combination.
+
+```{r}
+#df[df$cluster == "cluster_5",]
+df[df$cluster == "cluster_5" & df$organ == "Lung",]
+```
+
+This is the largest difference for our downsampled Gini Index by eye. However, we cannot run statistical tests at all because the degrees of freedom is too low.
+
+
+#7.A CDR3 Alpha/Beta Length
+
+## Alpha Length - For All Cells
+```{r}
+library(ggplot2)
+library(patchwork)
+
+# Creating histograms for each mouse and aligning the axes
+plot_mouse0082 <- ggplot(subset(IGT27_TCR, Mouse == "mouse0082"), aes(x = nchar(AA.JUNCTION_alpha))) +
+  geom_histogram(aes(y = ..density..), binwidth = 1, fill = "red") +
+  labs(title = "CDR3 Alpha Length - All Cells", x = "No Infection Male", y = "% of CDR3s per Mouse") + xlim(8,20) + ylim(0,0.35)
+
+plot_mouse0081 <- ggplot(subset(IGT27_TCR, Mouse == "mouse0081"), aes(x = nchar(AA.JUNCTION_alpha))) +
+  geom_histogram(aes(y = ..density..), binwidth = 1, fill = "green") +
+  labs(title = "", x = "Infected Female", y = "% of CDR3s per Mouse") + xlim(8,20) + ylim(0,0.35)
+
+plot_mouse0080 <- ggplot(subset(IGT27_TCR, Mouse == "mouse0080"), aes(x = nchar(AA.JUNCTION_alpha))) +
+  geom_histogram(aes(y = ..density..), binwidth = 1, fill = "blue") +
+  labs(title = "", x = "Infected Male", y = "% of CDR3s per Mouse") + xlim(8,20) + ylim(0,0.35)
+
+final_plot1 <- (plot_mouse0082 / plot_mouse0081) / plot_mouse0080
+#final_plot1
+```
+
+
+## Alpha Length - Cluster 5
+```{r}
+# Creating histograms for each mouse and aligning the axes
+plot_mouse0082 <- ggplot(subset(IGT27_TCR, Mouse == "mouse0082" & RNA_clusters == 5), aes(x = nchar(AA.JUNCTION_alpha))) +
+  geom_histogram(aes(y = ..density..), binwidth = 1, fill = "red") +
+  labs(title = "CDR3 Alpha Length - Cluster 5", x = "No Infection Male", y = "% of CDR3s per Mouse") + xlim(8,20) + ylim(0,0.35)
+
+plot_mouse0081 <- ggplot(subset(IGT27_TCR, Mouse == "mouse0081" & RNA_clusters == 5), aes(x = nchar(AA.JUNCTION_alpha))) +
+  geom_histogram(aes(y = ..density..), binwidth = 1, fill = "green") +
+  labs(title = "", x = "Infected Female", y = "% of CDR3s per Mouse") + xlim(8,20) + ylim(0,0.35)
+
+plot_mouse0080 <- ggplot(subset(IGT27_TCR, Mouse == "mouse0080" & RNA_clusters == 5), aes(x = nchar(AA.JUNCTION_alpha))) +
+  geom_histogram(aes(y = ..density..), binwidth = 1, fill = "blue") +
+  labs(title = "", x = "% of CDR3s per Mouse", y = "Count") + xlim(8,20) + ylim(0,0.35)
+
+final_plot2 <- (plot_mouse0082 / plot_mouse0081) / plot_mouse0080
+#final_plot2
+```
+
+## Beta Length - For All Cells
+```{r}
+# Creating histograms for each mouse and aligning the axes
+plot_mouse0082 <- ggplot(subset(IGT27_TCR, Mouse == "mouse0082"), aes(x = nchar(AA.JUNCTION_beta))) +
+  geom_histogram(aes(y = ..density..), binwidth = 1, fill = "red") +
+  labs(title = "CDR3 Beta Length - All Cells", x = "No Infection Male", y = "% of CDR3s per Mouse") + xlim(8,20) + ylim(0,0.35)
+
+plot_mouse0081 <- ggplot(subset(IGT27_TCR, Mouse == "mouse0081"), aes(x = nchar(AA.JUNCTION_beta))) +
+  geom_histogram(aes(y = ..density..), binwidth = 1, fill = "green") +
+  labs(title = "", x = "Infected Female", y = "% of CDR3s per Mouse") + xlim(8,20) + ylim(0,0.35)
+
+plot_mouse0080 <- ggplot(subset(IGT27_TCR, Mouse == "mouse0080"), aes(x = nchar(AA.JUNCTION_beta))) +
+  geom_histogram(aes(y = ..density..), binwidth = 1, fill = "blue") +
+  labs(title = "", x = "Infected Male", y = "% of CDR3s per Mouse") + xlim(8,20) + ylim(0,0.35)
+
+final_plot3 <- (plot_mouse0082 / plot_mouse0081) / plot_mouse0080
+#final_plot3
+```
+
+
+## Beta Length - Cluster 5
+```{r}
+# Creating histograms for each mouse and aligning the axes
+plot_mouse0082 <- ggplot(subset(IGT27_TCR, Mouse == "mouse0082" & RNA_clusters == 5), aes(x = nchar(AA.JUNCTION_beta))) +
+  geom_histogram(aes(y = ..density..), binwidth = 1, fill = "red") +
+  labs(title = "CDR3 Beta Length - Cluster 5", x = "No Infection Male", y = "% of CDR3s per Mouse") + xlim(8,20) + ylim(0,0.35)
+
+plot_mouse0081 <- ggplot(subset(IGT27_TCR, Mouse == "mouse0081" & RNA_clusters == 5), aes(x = nchar(AA.JUNCTION_beta))) +
+  geom_histogram(aes(y = ..density..), binwidth = 1, fill = "green") +
+  labs(title = "", x = "Infected Female", y = "% of CDR3s per Mouse") + xlim(8,20) + ylim(0,0.35)
+
+plot_mouse0080 <- ggplot(subset(IGT27_TCR, Mouse == "mouse0080" & RNA_clusters == 5), aes(x = nchar(AA.JUNCTION_beta))) +
+  geom_histogram(aes(y = ..density..), binwidth = 1, fill = "blue") +
+  labs(title = "", x = "Infected Male", y = "% of CDR3s per Mouse") + xlim(8,20)+ ylim(0,0.35)
+
+final_plot4 <- (plot_mouse0082 / plot_mouse0081) / plot_mouse0080
+#final_plot4
+```
+
+
+This is kind of interesting - 
+```
+length(IGT27_TCR$AA.JUNCTION_beta[which(IGT27_TCR$Mouse == "mouse0082" & IGT27_TCR$RNA_clusters == 5)])
+[1] 131
+> length(IGT27_TCR$AA.JUNCTION_beta[which(IGT27_TCR$Mouse == "mouse0081" & IGT27_TCR$RNA_clusters == 5)])
+[1] 211
+> length(IGT27_TCR$AA.JUNCTION_beta[which(IGT27_TCR$Mouse == "mouse0080" & IGT27_TCR$RNA_clusters == 5)])
+[1] 176
+```
+
+# 8. VJ Gene Usage
+
+```{r}
+v_gene_sample <- table(IGT27_TCR$V.GENE_beta, IGT27_TCR$Sample)
+v_gene_sample_freq <- prop.table(as.matrix(v_gene_sample), margin = 2)
+
+j_gene_sample <- table(IGT27_TCR$J.GENE_beta, IGT27_TCR$Sample)
+j_gene_sample_freq <- prop.table(as.matrix(j_gene_sample), margin = 2)
+
+
+pheatmap(as.matrix(v_gene_sample_freq), main = "V gene Frequency by Sample")
+pheatmap(as.matrix(j_gene_sample_freq), main = "J gene Frequency by Sample")
+
+v_gene_clust <- table(IGT27_TCR$V.GENE_beta, IGT27_TCR$RNA_clusters)
+v_gene_clust_freq <- prop.table(as.matrix(v_gene_clust), margin = 2)
+
+j_gene_clust <- table(IGT27_TCR$J.GENE_beta, IGT27_TCR$RNA_clusters)
+j_gene_clust_freq <- prop.table(as.matrix(j_gene_clust), margin = 2)
+
+pheatmap(as.matrix(v_gene_clust_freq), main = "V gene Frequency by Cluster")
+pheatmap(as.matrix(j_gene_clust_freq), main = "J gene Frequency by Cluster")
+
+```
+
+# 9. Pairwise Similarities Mean
+```{r}
+# Calculate pairwise sequence similarities
+
+#pairwise_similarities <- stringdistmatrix(IGT27_TCR$alphabeta_aa, method = "lv")
+
+load("pairwise_similarities.Rdata")
+```
+
+```{r}
+clusters <- sort(unique(IGT27_TCR$RNA_clusters))
+mice <- c("mouse0080", "mouse0081", "mouse0082")
+mean_pairwise <- matrix(nrow = length(mice), ncol = length(clusters))
+colnames(mean_pairwise) <- paste0("cluster_", sort(clusters))
+rownames(mean_pairwise) <- mice
+
+for (cluster in clusters) {
+  print(cluster)
+  for (mouse in mice) {
+    cluster_mouse_indices <- which(IGT27_TCR$RNA_clusters == cluster & IGT27_TCR$Mouse == mouse)
+    print(length(cluster_mouse_indices))
+    cluster_similarities <- as.vector(dist_subset(pairwise_similarities, cluster_mouse_indices))
+    print(head(cluster_similarities))
+    mean_pairwise[mouse, paste0("cluster_",cluster)] <- mean(cluster_similarities)
+  }
+}
+
+data_long_mean <- as.data.frame(mean_pairwise) %>% 
+  rownames_to_column(var = "mouse") %>% 
+  pivot_longer(cols = -mouse, names_to = "cluster", values_to = "value")
+
+data_long_mean  <- data_long_mean  %>%
+  mutate(Mouse_New = ifelse(mouse == "mouse0080", "Candida Infected Male", ifelse(mouse == "mouse0081", "Candida Infected Female", ifelse(mouse == "mouse0082", "No Infection Male", mouse))))
+
+# Create a barplot using ggplot2
+ggplot(data_long_mean, aes(x = cluster, y = value, color = Mouse_New)) + geom_point(stat = "identity") + ggtitle("Mean Levenshtein Distance in Mouse per Cluster") + theme(axis.text.x = element_text(angle = 45))
+```
+
+
+# 10. TurboGliph
+
+GLIPH2 - https://www.nature.com/articles/s41587-020-0505-4
+
+```{r}
+library(turboGliph)
+cdr3_beta_seqs <- IGT27_TCR$AA.JUNCTION_beta
+
+res_gliph2 <- turboGliph::gliph2(cdr3_sequences = cdr3_beta_seqs,
+                                 n_cores = 1)
+
+g1 <- plot_network(clustering_output = res_gliph2, n_cores = 1)
+
+```
+
+```{r}
+g1
+```
+
+
+```{r}
+cdr3_top_clusts <- which(res_gliph2[["cluster_properties"]][["cluster_size"]] %in% rev(sort(res_gliph2[["cluster_properties"]][["cluster_size"]]))[1:30])
+
+tag_top_clust <- res_gliph2[["cluster_properties"]][["tag"]][cdr3_top_clusts]
+
+tag_top_cdr3_list <- list()
+tag_clust_cdr3_df <- c()
+tag_mouse_cdr3_df <- c()
+
+for (i in tag_top_clust){
+  temp_cdr3_list <- res_gliph2[["cluster_list"]][[i]]$CDR3b
+  tag_top_cdr3_list[[i]] <- temp_cdr3_list
+  
+  tag_clust_cdr3_df <- cbind(tag_clust_cdr3_df, c(table(IGT27_TCR$RNA_clusters[IGT27_TCR$AA.JUNCTION_beta %in% temp_cdr3_list])))
+  
+  tag_mouse_cdr3_df <- cbind(tag_mouse_cdr3_df, c(table(IGT27_TCR$Mouse_New[IGT27_TCR$AA.JUNCTION_beta %in% temp_cdr3_list])))
+}
+
+colnames(tag_clust_cdr3_df) <- tag_top_clust
+colnames(tag_mouse_cdr3_df) <- tag_top_clust
+```
+
+
+```{r}
+df_temp <- as.data.frame(melt(tag_clust_cdr3_df))
+ggplot(data = df_temp, aes(x = Var2, y = value, fill = factor(Var1))) +
+  geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_colour_discrete()
+```
+
+
+```
+#temp_igt <- IGT27_TCR[IGT27_TCR$AA.JUNCTION_beta %in% cdr3_max_clust,]
+#table(temp_igt$Mouse_New)
+
+# Global Enrichment
+
+# Getting CDR3 beta sequences that have the highest cluster size
+#strsplit(res_gliph2[["global_enrichment"]][["CDR3b"]][which(res_gliph2[["global_enrichment"]][["cluster_size"]] == max(res_gliph2[["global_enrichment"]][["cluster_size"]]))], "\\s+")[[1]]
+
+# Getting CDR3 beta sequences that have the highest fisher score
+#strsplit(res_gliph2[["global_enrichment"]][["CDR3b"]][which(res_gliph2[["global_enrichment"]][["fisher.score"]] == max(res_gliph2[["global_enrichment"]][["fisher.score"]]))], "\\s+")[[1]]
+
+```

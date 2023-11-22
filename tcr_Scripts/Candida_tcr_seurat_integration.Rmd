@@ -1,0 +1,1734 @@
+---
+title: "Candida_tcr_seurat_integration"
+author: "Nathan Morris"
+date: "2023-10-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = getwd())
+```
+
+# Directory Set Up
+
+```{r}
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+```
+
+Here, we use the pre-existing seurat object.
+```{r}
+seurat_object_prefiltered <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT_new_metadata.Rds"))
+
+#seurat_object_WNN <- readRDS("Candida_ds_clean_WNN.rds") # I didn't include WNN analysis in this document
+#seurat_object <- readRDS(file = paste0(data_dir, "dataset_post_sc_Analysis.rds")) #If you want without WNN Clusters and without TCR Information
+
+#seurat_object_pseudo <- readRDS(file = paste0(data_dir, "pseudotime_seurat.rds"))
+```
+
+And we get the object containing our filtered TCR data
+```{r}
+IGT27_TCR <- read.table(paste0(data_dir, "IGT27_for_analysis.tsv"), header = TRUE, sep = "\t")
+```
+
+# Load Packages
+
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+library(ggplot2)
+library(Seurat)
+library(tibble)
+library(dplyr)
+library(pheatmap)
+library(tidyr)
+library(usedist)
+library(ggvenn)
+library(stringdist)
+library(patchwork)
+library(djvdj)
+library(data.table)
+```
+
+# 4. IGT27_TCR - Seurat Object Analysis Integration (TCR Filtered)
+
+## 4.A - Adding TCR Metadata
+```{r}
+seurat_object_prefiltered@meta.data[["TCR"]] <- seurat_object_prefiltered@meta.data[["cell_barcode"]] %in% IGT27_TCR$Barcode
+
+Idents(object = seurat_object_prefiltered) <- "TCR"
+
+seurat_object.TCR <- subset(x = seurat_object_prefiltered, subset = (TCR == TRUE))
+
+seurat_object.TCR$clonotype <- IGT27_TCR[match(seurat_object.TCR@meta.data[["cell_barcode"]], IGT27_TCR$Barcode),]$clonotype
+
+table(rev(sort(table(seurat_object.TCR$clonotype))))
+
+Idents(object = seurat_object.TCR) <- "clonotype"
+
+seurat_object.TCR$clonotype_frequency <- IGT27_TCR[match(seurat_object.TCR@meta.data[["cell_barcode"]], IGT27_TCR$Barcode),]$Clonotype_frequency
+
+table(rev(sort(table(seurat_object.TCR$clonotype))))
+
+seurat_object.TCR@meta.data[["paired_across_organ"]] <- seurat_object.TCR@meta.data[["cell_barcode"]] %in% IGT27_TCR$Barcode[IGT27_TCR$paired_across_organ == TRUE]
+
+Idents(object = seurat_object.TCR) <- "paired_across_organ"
+
+seurat_object.TCR@meta.data[["paired_across_organ"]]<- as.factor(seurat_object.TCR$paired_across_organ)
+
+seurat_object.TCR@meta.data[["duplicate"]] <- seurat_object.TCR@meta.data[["cell_barcode"]] %in% IGT27_TCR$Barcode[IGT27_TCR$duplicate == TRUE]
+
+Idents(object = seurat_object.TCR) <- "duplicate"
+
+seurat_object.TCR@meta.data[["duplicate"]]<- as.factor(seurat_object.TCR$duplicate)
+```
+
+The maximum proliferation of a certain clonotype is 10 cells. This is due to 4 of the cells of the original maximum 14 not having RNA data.
+
+This is proven here.
+
+```{r}
+table(IGT27_TCR$RNA_clusters[IGT27_TCR$clonotype == names(which(table(seurat_object.TCR$clonotype) == 10))], useNA = "ifany")
+```
+
+10/3/2023 Break
+
+## 4.B - Simple TCR QC
+
+Clonotype Frequency Statistics
+```{r}
+# The number of TCR labeled cells with RNA data is:
+paste0("The number of TCR labeled cells with RNA data is: ", ncol(seurat_object.TCR))
+
+# The number of unique TCR clonotypes is:
+paste0("The number of unique TCR clonotypes is: ", length(unique(seurat_object.TCR@meta.data[["clonotype"]])))
+```
+
+Therefore, there are a majority unique clonotypes, and a maximum number of proliferated cells of 138.
+
+This shows that the TCR cells are spread throughout the different T-cell states (CD4 and CD8)
+```{r}
+DimPlot(seurat_object_prefiltered, reduction = "umap_rna", group.by = "TCR") + ggtitle("TCR Seq by RNA UMAP")
+DimPlot(seurat_object_prefiltered, reduction = "umap_rna", group.by = "TCR", split.by = "Infection") + ggtitle("TCR Seq by RNA UMAP")
+#DimPlot(seurat_object, reduction = "wnn.umap", group.by = "TCR") + ggtitle("TCR Seq by WNN UMAP")
+```
+
+This shows that the TCR cells show similar distribution of Infection and Organ when compared to all cells
+```{r}
+DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "Infection")
+DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "Organ")
+table(seurat_object.TCR@meta.data$Infection)
+table(seurat_object.TCR@meta.data$RNA_clusters)
+table(seurat_object.TCR@meta.data$Mouse)
+```
+## 4.C Clonotype Frequency
+
+```{r}
+DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "clonotype_frequency") + ggtitle("Clonotype Freq by RNA UMAP")
+#DimPlot(seurat_object, reduction = "wnn.umap", group.by = "TCR") + ggtitle("TCR Seq by WNN UMAP")
+
+DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "clonotype_frequency", split.by = "duplicate") + ggtitle("Clonotype Freq by RNA UMAP split by Duplicate")
+```
+```{r}
+TCR_clonotype_freq <- as.data.frame(table(seurat_object.TCR$clonotype_frequency, seurat_object.TCR$Mouse_New))
+colnames(TCR_clonotype_freq)[1] <- "Clonotype_Freq"
+colnames(TCR_clonotype_freq)[2] <- "Mouse"
+
+TCR_clonotype_freq <- TCR_clonotype_freq %>%
+    group_by(Mouse) %>%
+    summarise(
+        "n = 1" = sum(Freq[Clonotype_Freq == 1]) / sum(Freq) * 100,
+        "n = 2" = sum(Freq[Clonotype_Freq == 2]) / sum(Freq) * 100,
+        "n > 3" = sum(Freq[Clonotype_Freq %in% c("4", "5", "6", "14")]) / sum(Freq) * 100
+    ) %>%
+    ungroup()
+
+TCR_clonotype_freq_percentages_long <- TCR_clonotype_freq%>%
+  pivot_longer(cols = starts_with("n"), 
+               names_to = "Clonotype", 
+               values_to = "Percentage")
+
+# Plot the stacked barplot
+ggplot(TCR_clonotype_freq_percentages_long, aes(x = Mouse, y = Percentage, fill = Clonotype)) +
+  geom_bar(stat = "identity", position = position_stack(reverse = TRUE)) +
+  geom_text(aes(label = substr(as.character(Percentage), 0, 4), group = Clonotype), position = position_stack(vjust = 0.5, reverse = TRUE), size = 3) +
+  labs(title = "Stacked Barplot of Frequency Percentages by Mouse",
+       x = "Mouse",
+       y = "Percentage",
+       fill = "Clone Size") +
+  scale_fill_manual(values = c("n = 1" = "blue", "n = 2" = "green", "n > 3" = "red")) +
+  theme(legend.position = "right")
+
+
+# Plot the faceted barplot
+ggplot(TCR_clonotype_freq_percentages_long, aes(x = Clonotype, y = Percentage, fill = Clonotype)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = substr(as.character(Percentage), 0, 4)), position = position_stack(vjust = 0.5)) +
+  labs(title = "Stacked Barplot of Frequency Percentages by Mouse",
+       x = "Mouse",
+       y = "Percentage",
+       fill = "Number of Cells with identical Clonotype") +
+  theme(legend.position = "right") + facet_wrap( ~ Mouse)
+```
+
+
+
+
+## 4.C UMAP with Clonotype Frequency Scores as Sizes
+
+```{r}
+# Only showing cells with proliferating Clonotypes
+DimPlot(seurat_object.TCR[,seurat_object.TCR$clonotype_frequency > 1], reduction = "umap_rna", group.by = "RNA_clusters", split.by = "Infection", pt.size = (seurat_object.TCR[,seurat_object.TCR$clonotype_frequency > 1]$clonotype_frequency)*0.6, shape.by = "paired_across_organ") + ggtitle("Proliferated Clonotypes - Color by Cluster, Size by # of Cells with same Clonotype, Shape by Migratory") + theme(plot.title = element_text(size = 7, face = "bold"))
+
+DimPlot(seurat_object.TCR[,seurat_object.TCR$clonotype_frequency > 2], reduction = "umap_rna", group.by = "RNA_clusters", split.by = "Infection", pt.size = (seurat_object.TCR[,seurat_object.TCR$clonotype_frequency > 2]$clonotype_frequency)*0.6, shape.by = "paired_across_organ") + ggtitle("Proliferated Clonotypes - Color by Cluster, Size by # of Cells with same Clonotype, Shape by Migratory") + theme(plot.title = element_text(size = 7, face = "bold"))
+
+#ggtitle("<span style='font-size: 10pt;'>Proliferated Clonotypes - Color by Cluster, Size by # of Cells with same Clonotype, Shape by Migratory.</font>")
+```
+
+
+```{r}
+# Showing all Cells
+DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "RNA_clusters", split.by = "Infection", cells.highlight = which(seurat_object.TCR$duplicate == TRUE), pt.size = (seurat_object.TCR$clonotype_frequency)*0.6) + ggtitle("All cells - Proliferating Highlighted") + theme(plot.title = element_text(size = 7, face = "bold")) + NoLegend()
+
+DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "RNA_clusters", split.by = "Infection", cells.highlight = which(seurat_object.TCR$paired_across_organ == TRUE), pt.size = (seurat_object.TCR$clonotype_frequency)*0.6) + ggtitle("All cells - Paired Highlighted") + theme(plot.title = element_text(size = 7, face = "bold")) + NoLegend()
+
+DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "RNA_clusters", split.by = "Infection", pt.size = (seurat_object.TCR$clonotype_frequency)*0.6, shape.by = "paired_across_organ") + ggtitle("All cells - Color by Cluster, Size by # of Cells with same Clonotype, Shape by if across Organ") + theme(plot.title = element_text(size = 7, face = "bold"))
+```
+
+
+## 4.D Paired and Duplicate Frequency Distributions
+
+### Paired Clonotypes Frequency Distribution
+The below shows that a majority of the cells with TCR duplicates in multiple organs are in RNA Cluster 5. These are the clusters where we find a majority of the Th17 cell population.
+```{r}
+DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "paired_across_organ") + ggtitle("TCR Paired by RNA UMAP")
+
+#TCR_paired_by_RNA <- as.data.frame(table(seurat_object.TCR$RNA_clusters[seurat_object.TCR$paired_across_organ == TRUE]))
+TCR_paired_by_RNA <- as.data.frame(table(seurat_object.TCR$RNA_clusters[seurat_object.TCR$paired_across_organ == TRUE],seurat_object.TCR$Mouse_New[seurat_object.TCR$paired_across_organ == TRUE]))
+colnames(TCR_paired_by_RNA)[1] <- "RNA_Cluster"
+colnames(TCR_paired_by_RNA)[2] <- "Mouse"
+
+ggplot(TCR_paired_by_RNA, aes(x = factor(RNA_Cluster), y = Freq, fill = Mouse)) +
+  geom_bar(stat = "identity") +
+  labs(x = "RNA Cluster", y = "Frequency") +
+  ggtitle("Frequency of Cells with Paired Clonotypes across Organs in RNA Clusters") +
+  theme_minimal()
+
+TCR_paired_by_Organ <- as.data.frame(table(seurat_object.TCR$Organ[seurat_object.TCR$paired_across_organ == TRUE], seurat_object.TCR$Mouse_New[seurat_object.TCR$paired_across_organ == TRUE]))
+colnames(TCR_paired_by_Organ)[1] <- "Organ"
+colnames(TCR_paired_by_Organ)[2] <- "Mouse"
+
+ggplot(TCR_paired_by_Organ, aes(x = factor(Organ), y = Freq, fill = Mouse)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Organ", y = "Frequency") +
+  ggtitle("Frequency of Cells with Paired Clonotypes across Organs in Organs") +
+  theme_minimal()
+```
+
+### Duplicate Clonotypes Frequency Distribution
+
+```{r}
+DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "duplicate") + ggtitle("TCR Duplicate by RNA UMAP")
+
+#TCR_duplicate_by_RNA <- as.data.frame(table(seurat_object.TCR$RNA_clusters[seurat_object.TCR$duplicate == TRUE]))
+TCR_duplicate_by_RNA <- as.data.frame(table(seurat_object.TCR$RNA_clusters[seurat_object.TCR$duplicate == TRUE],seurat_object.TCR$Mouse_New[seurat_object.TCR$duplicate == TRUE]))
+colnames(TCR_duplicate_by_RNA)[1] <- "RNA_Cluster"
+colnames(TCR_duplicate_by_RNA)[2] <- "Mouse"
+
+ggplot(TCR_duplicate_by_RNA, aes(x = factor(RNA_Cluster), y = Freq, fill = Mouse)) +
+  geom_bar(stat = "identity") +
+  labs(x = "RNA Cluster", y = "Frequency") +
+  ggtitle("Frequency of Cells with Duplicate Clonotypes across Organs in RNA Clusters") +
+  theme_minimal()
+
+TCR_duplicate_by_Organ <- as.data.frame(table(seurat_object.TCR$Organ[seurat_object.TCR$duplicate == TRUE], seurat_object.TCR$Mouse_New[seurat_object.TCR$duplicate == TRUE]))
+colnames(TCR_duplicate_by_Organ)[1] <- "Organ"
+colnames(TCR_duplicate_by_Organ)[2] <- "Mouse"
+
+ggplot(TCR_duplicate_by_Organ, aes(x = factor(Organ), y = Freq, fill = Mouse)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Organ", y = "Frequency") +
+  ggtitle("Frequency of Cells with Duplicate Clonotypes across Organs in Organs") +
+  theme_minimal()
+```
+
+
+
+## 4.E Prop Test for TCRs - Total#/Proliferating#/Migratory#
+
+We want to see if the Total Number of TCRs is enriched in a cluster in Ca vs No
+Also if the number of proliferating TCRs is enriched in a cluster in Ca vs No
+
+```{r}
+
+organs <- unique(seurat_object.TCR$Organ)
+clusters <- sort(unique(seurat_object.TCR$RNA_clusters))
+
+total_tcr <- c()
+clono_tcr <- c()
+prolif_tcr <- c()
+migratory_tcr <- c()
+
+perc_total <- c()
+perc_clono <- c()
+perc_prolif <- c()
+perc_migratory <- c()
+
+for (organ in organs){
+  for (cluster in clusters){
+    #print(organ)
+    #print(cluster)
+    
+    # Total cells with TCR
+    success_total <- as.data.frame(table(seurat_object.TCR$Infection[seurat_object.TCR$RNA_clusters == cluster & seurat_object.TCR$Organ == organ]))
+    Ca_total_success <- success_total$Freq[success_total$Var1 == "Ca"]
+    No_total_success <- success_total$Freq[success_total$Var1 == "No"]
+    
+    organ_total <- as.data.frame(table(seurat_object$Infection[seurat_object$Organ == organ]))
+    Ca_organ_total <- organ_total$Freq[organ_total$Var1 == "Ca"]
+    No_organ_total <- organ_total$Freq[organ_total$Var1 == "No"]
+  
+    prop_test_result <- prop.test(x = c(Ca_total_success, No_total_success),
+                             n = c(Ca_organ_total, No_organ_total),
+                             alternative = "greater") # Used greater here to filter for only clusters that are significantly enriched in the Ca, not if it's higher in the No
+    
+    temp_df_total <- c(organ, cluster, Ca_total_success, No_total_success, Ca_organ_total, No_organ_total, prop_test_result$p.value)
+    
+    total_tcr <- rbind(total_tcr, temp_df_total)
+    colnames(total_tcr) <- c("Organ", "Cluster", "Ca_success", "No_success", "Ca_total", "No_total", "p-val")
+    
+    # Total TCR % (% of all cells)
+    
+    denom_total <- as.data.frame(table(seurat_object$Infection[seurat_object$RNA_clusters == cluster & seurat_object$Organ == organ]))
+    
+    no_denom <- denom_total$Freq[1]
+    ca_denom <- denom_total$Freq[2]
+    
+    try(prop_test_result_total_perc <- prop.test(x = c(Ca_total_success, No_total_success),
+                             n = c(ca_denom, no_denom),
+                             alternative = "two.sided"))
+    
+    temp_df_perc_total <- c(organ, cluster, Ca_clono_success, No_clono_success, ca_denom, no_denom, CA_Proportion, NT_Proportion, prop_test_result_total_perc$p.value)
+    
+    perc_total <- rbind(perc_total, temp_df_perc_total)
+    colnames(perc_total) <- c("Organ", "Cluster", "Ca_total_num", "No_total_num", "Ca_total", "No_total", "CA_Proportion", "NT_Proportion", "p-val")
+    
+    # Unique Clonotypes
+    success_clono <- as.data.frame(table(seurat_object.TCR$clonotype[seurat_object.TCR$RNA_clusters == cluster & seurat_object.TCR$Organ == organ], seurat_object.TCR$Infection[seurat_object.TCR$RNA_clusters == cluster & seurat_object.TCR$Organ == organ]))
+    Ca_clono_success <- sum(success_clono$Freq[success_clono$Var2 == "Ca"] > 0)
+    No_clono_success <- sum(success_clono$Freq[success_clono$Var2 == "No"] > 0)
+    
+    prop_test_result_clono <- prop.test(x = c(Ca_clono_success, No_clono_success),
+                             n = c(Ca_organ_total, No_organ_total),
+                             alternative = "two.sided")
+    
+    CA_Proportion <- Ca_clono_success / Ca_organ_total
+    NT_Proportion <- No_clono_success / No_organ_total
+    
+    temp_df_clono <- c(organ, cluster, Ca_clono_success, No_clono_success, Ca_organ_total, No_organ_total, CA_Proportion, NT_Proportion, prop_test_result_clono$p.value)
+    
+    clono_tcr <- rbind(clono_tcr, temp_df_clono)
+    colnames(clono_tcr) <- c("Organ", "Cluster", "Ca_clono_num", "No_clono_num", "Ca_total", "No_total", "CA_Proportion", "NT_Proportion", "p-val")
+    
+    
+    # Clono %
+    
+    try(prop_test_result_clono_perc <- prop.test(x = c(Ca_clono_success, No_clono_success),
+                             n = c(ca_denom, no_denom),
+                             alternative = "two.sided"))
+    
+    CA_Proportion <- Ca_clono_success / ca_denom
+    NT_Proportion <- No_clono_success / no_denom
+    
+    temp_df_clono_perc <- c(organ, cluster, Ca_clono_success, No_clono_success, ca_denom, no_denom, CA_Proportion, NT_Proportion, prop_test_result_clono_perc$p.value)
+    
+    perc_clono <- rbind(perc_clono, temp_df_clono_perc)
+    colnames(perc_clono) <- c("Organ", "Cluster", "Ca_clono_num", "No_clono_num", "Ca_total", "No_total", "CA_Proportion", "NT_Proportion", "p-val")
+    
+    # Proliferating TCR
+    success_prolif <- as.data.frame(table(seurat_object.TCR$Infection[seurat_object.TCR$RNA_clusters == cluster & seurat_object.TCR$Organ == organ & seurat_object.TCR$duplicate == TRUE]))
+    Ca_prolif_success <- success_prolif$Freq[success_prolif$Var1 == "Ca"]
+    No_prolif_success <- success_prolif$Freq[success_prolif$Var1 == "No"]
+    
+    prop_test_result_prolif <- prop.test(x = c(Ca_prolif_success, No_prolif_success),
+                             n = c(Ca_organ_total, No_organ_total),
+                             alternative = "two.sided")
+    
+    temp_df_prolif <- c(organ, cluster, Ca_prolif_success, No_prolif_success, Ca_organ_total, No_organ_total, prop_test_result_prolif$p.value)
+    
+    prolif_tcr <- rbind(prolif_tcr, temp_df_prolif)
+    colnames(prolif_tcr) <- c("Organ", "Cluster", "Ca_prolif_num", "No_prolif_num", "Ca_total", "No_total", "p-val")
+    
+    # % Prolif
+    
+    try(prop_test_result_prolif_perc <- prop.test(x = c(Ca_prolif_success, No_prolif_success),
+                             n = c(ca_denom, no_denom),
+                             alternative = "two.sided"))
+    
+    CA_Proportion <- Ca_prolif_success / ca_denom
+    NT_Proportion <- No_prolif_success / no_denom
+    
+    temp_df_prolif_perc <- c(organ, cluster, Ca_prolif_success, No_prolif_success, ca_denom, no_denom, CA_Proportion, NT_Proportion, prop_test_result_prolif_perc$p.value)
+    
+    perc_prolif <- rbind(perc_prolif, temp_df_prolif_perc)
+    colnames(perc_prolif) <- c("Organ", "Cluster", "Ca_prolif_num", "No_prolif_num", "Ca_total", "No_total", "CA_Proportion", "NT_Proportion", "p-val")
+    
+    # Migratory TCR
+    success_migratory <- as.data.frame(table(seurat_object.TCR$Infection[seurat_object.TCR$RNA_clusters == cluster & seurat_object.TCR$Organ == organ & seurat_object.TCR$paired_across_organ == TRUE]))
+    Ca_migratory_success <- success_migratory$Freq[success_migratory$Var1 == "Ca"]
+    No_migratory_success <- success_migratory$Freq[success_migratory$Var1 == "No"]
+    
+    prop_test_result_migratory <- prop.test(x = c(Ca_migratory_success, No_migratory_success),
+                             n = c(Ca_organ_total, No_organ_total),
+                             alternative = "two.sided")
+    
+    temp_df_migratory <- c(organ, cluster, Ca_migratory_success, No_migratory_success, Ca_organ_total, No_organ_total, prop_test_result_migratory$p.value)
+    
+    migratory_tcr <- rbind(migratory_tcr, temp_df_migratory)
+    colnames(migratory_tcr) <- c("Organ", "Cluster", "Ca_success", "No_success", "Ca_total", "No_total", "p-val")
+    
+    
+    # % Migratory
+    
+    try(prop_test_result_migratory_perc <- prop.test(x = c(Ca_migratory_success, No_migratory_success),
+                             n = c(ca_denom, no_denom),
+                             alternative = "two.sided"))
+    
+    CA_Proportion <- Ca_migratory_success / ca_denom
+    NT_Proportion <- No_migratory_success / no_denom
+    
+    temp_df_migratory_perc <- c(organ, cluster, Ca_migratory_success, No_migratory_success, ca_denom, no_denom, CA_Proportion, NT_Proportion, prop_test_result_migratory_perc$p.value)
+    
+    perc_migratory <- rbind(perc_migratory, temp_df_migratory_perc)
+    colnames(perc_migratory) <- c("Organ", "Cluster", "Ca_migratory_num", "No_migratory_num", "Ca_total", "No_total", "CA_Proportion", "NT_Proportion", "p-val")
+    
+  }
+}
+total_tcr <- as.data.frame(total_tcr)
+total_tcr$corrected_p_values_fdr_total <- p.adjust(total_tcr$'p-val', method = "bonf")
+total_tcr$signif <- total_tcr$corrected_p_values_fdr_total < 0.05
+
+clono_tcr <- as.data.frame(clono_tcr)
+clono_tcr$corrected_p_values_fdr_total <- p.adjust(clono_tcr$'p-val', method = "bonf")
+clono_tcr$signif <- clono_tcr$corrected_p_values_fdr_total < 0.05
+
+prolif_tcr <- as.data.frame(prolif_tcr)
+prolif_tcr$corrected_p_values_fdr_prolif <- p.adjust(prolif_tcr$'p-val', method = "fdr")
+prolif_tcr$signif <- prolif_tcr$corrected_p_values_fdr_prolif < 0.05
+
+migratory_tcr <- as.data.frame(migratory_tcr)
+migratory_tcr$corrected_p_values_fdr_migratory <- p.adjust(migratory_tcr$'p-val', method = "fdr")
+migratory_tcr$signif <- migratory_tcr$corrected_p_values_fdr_migratory < 0.05
+
+perc_total <- as.data.frame(perc_total)
+perc_total$corrected_p_values <- p.adjust(perc_total$'p-val', method = "fdr")
+perc_total$signif <- perc_total$corrected_p_values < 0.05
+
+perc_clono <- as.data.frame(perc_clono)
+perc_clono$corrected_p_values <- p.adjust(perc_clono$'p-val', method = "fdr")
+perc_clono$signif <- perc_clono$corrected_p_values < 0.05
+
+perc_prolif <- as.data.frame(perc_prolif)
+perc_prolif$corrected_p_values <- p.adjust(perc_prolif$'p-val', method = "fdr")
+perc_prolif$signif <- perc_prolif$corrected_p_values < 0.05
+
+perc_migratory <- as.data.frame(perc_migratory)
+perc_migratory$corrected_p_values <- p.adjust(perc_migratory$'p-val', method = "fdr")
+perc_migratory$signif <- perc_migratory$corrected_p_values < 0.05
+
+```
+
+Plotting clono_tcr
+
+```{r}
+#library(reshape2)
+#df.long <- melt(df, id.vars=c("Organ", "Cluster"))
+library(tidyr)
+clono.long <- clono_tcr %>%
+  pivot_longer(cols = c(NT_Proportion, CA_Proportion),
+               names_to = "Proportion_Type",
+               values_to = "Proportion_Value")
+
+clono.long$Proportion_Type <- as.factor(clono.long$Proportion_Type)
+clono.long$Proportion_Value <- as.numeric(clono.long$Proportion_Value)
+
+ggplot(clono.long, aes(x = Cluster, y = Proportion_Value, fill = Organ)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~Proportion_Type, scales = "free_y") +
+  labs(x = "Cluster", y = "Proportion") +
+  theme_minimal()
+
+ggplot(clono.long, aes(x = Proportion_Type, y = Proportion_Value, fill = Organ)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~Cluster, scales = "free_y") +
+  labs(x = "Cluster", y = "Proportion")
+
+my_comparisons <- list(c("NT_Proportion", "CA_Proportion"))
+
+ggplot(clono.long, aes(x = Organ, y = Proportion_Value, fill = Proportion_Type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~Cluster, scales = "free_y") +
+  labs(x = "Cluster", y = "Proportion") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(legend.position = "top") + stat_compare_means(comparisons = my_comparisons, method = "wilcox.test", label =  "p.signif", paired = FALSE) +ggtitle("Proportion of Unique TCRs per cell in Cluster/Organ") + scale_y_continuous()#+ ylim(0,0.5)
+```
+
+# 5. DJVDJ - Seurat Object Analysis (Frequency, Diversity, Similarity) using Raw TCR Data
+
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+#library(immunarch)
+
+# Frequency Analysis
+#https://github.com/rnabioco/djvdj/blob/master/vignettes/frequency.Rmd
+
+vdj_dirs <- ("/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/TCR_data/")
+
+seurat_object_temp <- seurat_object_prefiltered
+temp <- as.vector(paste(colnames(seurat_object_temp), "-1", sep=""))
+new_names <- substr(temp, start = 7, stop = nchar(temp))
+
+seurat_object_temp <- RenameCells(seurat_object_temp, new.names = new_names)
+seurat_object_temp$cell_barcode <- new_names
+
+#head(rownames(seurat_object.1[[]]))
+#head(read.table("/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/TCR_data/airr_rearrangement.tsv",sep="\t",header=TRUE)$cell_id)
+
+so_vdj <- seurat_object_temp |>
+  import_vdj(vdj_dir = vdj_dirs,
+             filter_paired = TRUE,
+             filter_chains = TRUE,
+             define_clonotypes = "cdr3aa")
+
+#so_vdj <- seurat_object_temp |>
+#  import_vdj(vdj_dir = vdj_dirs, define_clonotypes = "cdr3aa")
+
+# Defines the clonotypes to be based n the CDR3 amino acid sequence
+```
+
+I've decided to use the cdr3aa region to define the clonotypes. This is the complementary determining regions, and most of the sequence variation is associated with immunoglobulins and T-cell receptors found in the CDRs. They are referred to as the hypervariable regions.
+
+https://en.wikipedia.org/wiki/Complementarity-determining_region
+
+```{r}
+table(so_vdj@meta.data[["n_chains"]], useNA = "ifany")
+
+# Create a new metadata column with "RNA_" prefix added to existing values
+existing_metadata <- so_vdj$RNA_clusters
+so_vdj$RNA_new <- paste("RNA_", existing_metadata, sep = "")
+
+#so <- so[,!is.na(so$cdr3)]
+#so <- so[, so$chains == "TRB"]
+```
+
+
+```{r}
+so_vdj <- so_vdj |>
+    calc_frequency(data_col = "cdr3",
+    cluster_col = "RNA_new")
+#Adds columns showing the number of occurrences of each clonotype ('freq'), the percentage of cells sharing the clonotype ('pct'), and a label that can be used for plotting ('grp'). By default these calculations will be performed for all cells in the object.
+#meta.data column ('shared') will be added indicating whether the clonotype is shared between multiple clusters (in our case sample_names).
+# I don't understand percent here?
+
+so_vdj |>
+  plot_clone_frequency(
+    data_col    = "cdr3",
+    cluster_col = "RNA_new",
+    method      = "line",
+    trans       = "log10"         # log-transform axis 
+    ) +
+  theme(aspect.ratio = 0.8)
+```
+
+```{r}
+na.omit(so_vdj$sample_name[so_vdj$clonotype_id == "clonotype7793"])
+rev(sort(table(so_vdj$clonotype_id)))[1:5]
+```
+
+## 5.A Clonotype Frequency by Mouse
+
+```{r}
+# sum(rev(sort(table(so_vdj$clonotype_id)))>2)
+# Top 20 only are above 3 cells - aka proliferating
+# https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8093776/
+temp_df <- t(as.data.frame(rev(sort(table(so_vdj$clonotype_id)))[1:20]))
+colnames(temp_df) <- temp_df["Var1",]
+temp_df
+
+so_vdj$Mouse_New <- as.factor(so_vdj$Mouse_New)
+
+# Frequency Table by Sample
+get_frequency_table_Mouse <- function(clonotype) {
+  table(so_vdj$Mouse_New[so_vdj$clonotype_id == clonotype])
+}
+
+frequency_df_by_Mouse <- as.data.frame(sapply(colnames(temp_df), get_frequency_table_Mouse))
+frequency_df_by_Mouse["Total_Freq",] <- sapply(colnames(temp_df), function(x) length(which((so_vdj$clonotype_id == x))))
+
+normalize_df_by_Mouse <- as.data.frame(sapply(colnames(temp_df), get_frequency_table_Mouse))
+normalize_df_by_Mouse["No Infection Male",] <- normalize_df_by_Mouse["No Infection Male",] / (length(so_vdj$cell_barcode[so_vdj$Mouse_New == "No Infection Male"]))
+normalize_df_by_Mouse["Infected Female",] <- normalize_df_by_Mouse["Infected Female",] / (length(so_vdj$cell_barcode[so_vdj$Mouse_New == "Infected Female"]))
+normalize_df_by_Mouse["Infected Male",] <- normalize_df_by_Mouse["Infected Male",] / (length(so_vdj$cell_barcode[so_vdj$Mouse_New == "Infected Male"]))
+```
+
+```{r}
+# By Sample Non_normalized
+
+data_melted_mouse <- as.data.frame(t(frequency_df_by_Mouse[rownames(frequency_df_by_Mouse) != "Total_Freq", ])) %>%
+  rownames_to_column(var = "Row") %>%
+  pivot_longer(cols = -Row, names_to = "Sample", values_to = "Frequency")
+
+ggplot(data_melted_mouse, aes(x = reorder(Row, -Frequency, sum), y = Frequency, fill = Sample)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Stacked Barplot of Clonotype Frequencies by Mouse",
+    x = "Clonotype",
+    y = "Frequency",
+    fill = "Mouse") +
+  theme_minimal() +
+  theme(legend.position = "top", axis.text.x = element_text(angle = 45, hjust = 1)) + coord_flip()
+
+
+  # Sample Faceted
+data_melted_mouse <- data_melted_mouse[data_melted_mouse$Frequency > 0,]
+data_melted_mouse$Infection <- substring(data_melted_mouse$Sample, 4, 5)
+
+ggplot(data_melted_mouse, aes(x = reorder(Row, -Frequency, sum), y = Frequency, fill = Sample)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Stacked Barplot of Clonotype Frequencies by Mouse",
+    x = "Clonotype",
+    y = "Frequency") +
+  theme_minimal() + facet_grid(. ~ Sample) +
+  theme(legend.position = "top", axis.text.x = element_text(angle = 45, hjust = 1)) + coord_flip()
+
+# By Sample Normalized
+
+data_melted_mouse <- as.data.frame(t(normalize_df_by_Mouse[rownames(normalize_df_by_Mouse) != "Total_Freq", ])) %>%
+  rownames_to_column(var = "Row") %>%
+  pivot_longer(cols = -Row, names_to = "Sample", values_to = "Frequency")
+
+ggplot(data_melted_mouse, aes(x = reorder(Row, -Frequency, sum), y = Frequency, fill = Sample)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Stacked Barplot of Clonotype Frequencies by Mouse",
+    x = "Clonotype",
+    y = "Frequency",
+    fill = "Mouse") +
+  theme_minimal() +
+  theme(legend.position = "top", axis.text.x = element_text(angle = 45, hjust = 1)) + coord_flip()
+
+
+  # Sample Faceted
+data_melted_mouse <- data_melted_mouse[data_melted_mouse$Frequency > 0,]
+data_melted_mouse$Infection <- substring(data_melted_mouse$Sample, 4, 5)
+
+ggplot(data_melted_mouse, aes(x = reorder(Row, -Frequency, sum), y = Frequency, fill = Sample)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Stacked Barplot of Clonotype Frequencies by Mouse",
+    x = "Clonotype",
+    y = "Frequency") +
+  theme_minimal() + facet_grid(. ~ Sample) +
+  theme(legend.position = "top", axis.text.x = element_text(angle = 45, hjust = 1)) + coord_flip()
+
+
+```
+
+## 5.A-2 DJVDJ Clonotype Freq by Sample
+```{r}
+so_vdj <- so_vdj |>
+  calc_frequency(
+    data_col = "clonotype_id",
+    cluster_col = "sample_name"
+  )
+
+so_vdj |>
+  plot_clone_frequency(
+    data_col = "clonotype_id",
+    cluster_col = "sample_name"
+  )
+```
+
+## 5.B Clonotype Frequency by Cluster
+
+```{r}
+# Frequency Table by All Clusters
+
+# Frequency Table by Sample
+get_frequency_table_Cluster <- function(clonotype) {
+  table(so_vdj$RNA_clusters[so_vdj$clonotype_id == clonotype])
+}
+
+frequency_df_by_Cluster <- as.data.frame(sapply(colnames(temp_df), get_frequency_table_Cluster))
+
+normalize_df_by_Cluster <- as.data.frame(sapply(colnames(temp_df), get_frequency_table_Cluster))
+for (i in sort(unique(so_vdj$RNA_clusters))){
+  normalize_df_by_Cluster[i,] <- normalize_df_by_Cluster[i,] / (length(so_vdj$cell_barcode[so_vdj$RNA_clusters == i]))
+}
+```
+
+```{r}
+# By All Cells Clusters
+
+data_melted_clust <- as.data.frame(t(normalize_df_by_Cluster[rownames(normalize_df_by_Cluster) != "Total_Freq", ])) %>%
+  rownames_to_column(var = "Row") %>%
+  pivot_longer(cols = -Row, names_to = "Cluster", values_to = "Frequency")
+
+ggplot(data_melted_clust, aes(x = reorder(Row, -Frequency, sum), y = Frequency, fill = Cluster)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Stacked Barplot of Clonotype Frequencies by  All Cells Cluster",
+       x = "Clonotype",
+       y = "Frequency",
+       fill = "All Cells Cluster") +
+  theme_minimal() +
+  theme(legend.position = "top", axis.text.x = element_text(angle = 45, hjust = 1)) + coord_flip()
+
+ggplot(data_melted_clust, aes(x = reorder(Row, -Frequency, sum), y = Frequency, fill = Cluster)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Stacked Barplot of Clonotype Frequencies by  All Cells Cluster",
+       x = "Clonotype",
+       y = "Frequency",
+       fill = "All Cells Cluster") +
+  theme_minimal() + facet_grid(. ~ Cluster) +
+  theme(legend.position = "top", axis.text.x = element_text(angle = 45, hjust = 1)) + coord_flip()
+```
+
+## 5.B-2 DJVDJ Clonotype Freq by Cluster
+
+```{r}
+so_vdj <- so_vdj |>
+  calc_frequency(
+    data_col = "cdr3",
+    cluster_col = "RNA_clusters"
+  )
+
+so_vdj |>
+  plot_clone_frequency(
+    data_col = "cdr3",
+    cluster_col = "RNA_clusters"
+  )+ theme(axis.text.x=element_blank())
+```
+
+## 5.C Diversity Indexes by Cluster
+
+```{r}
+gini <- function(x) {
+  total <- 0
+  sorted_x <- sort(x)
+  for (i in 1:(length(sorted_x) - 1)) {
+    total <- total + sum(abs(sorted_x[i] - sorted_x[(i + 1):length(sorted_x)]))
+  }
+  return(total / (length(sorted_x)^2 * mean(sorted_x)))
+}
+```
+
+```{r}
+clusters <- sort(unique(so_vdj$RNA_clusters))
+cluster_D50 <- list()
+cluster_simpson_div_index <- list()
+cluster_gini_index <- list()
+
+for (cluster in clusters) {
+  #print(cluster)
+  clonotype_ids <- so_vdj[, so_vdj$RNA_clusters == cluster]@meta.data[["clonotype_id"]]
+  clonotype_ids <- clonotype_ids[!is.na(clonotype_ids)]
+  # Check if clonotype_ids has zero rows and skip the cluster if true
+  if (length(clonotype_ids) > 0) {
+    data_table <- table(clonotype_ids)
+    data <- as.data.frame(rev(sort(table(clonotype_ids))))
+    colnames(data) <- c("clonotype_sequence", "abundance")
+    sorted_data <- data[order(-data$abundance), ]
+    total_abundance <- sum(sorted_data$abundance)
+    cumulative_percentages <- cumsum(sorted_data$abundance) / total_abundance * 100
+    d50_index <- which.max(cumulative_percentages >= 50)
+    cluster_D50[cluster] <- d50_index
+    
+    simp_index <- 1 - sum((sorted_data$abundance * (sorted_data$abundance - 1)) / (total_abundance * (total_abundance - 1)))
+
+    cluster_simpson_div_index[cluster] <- simp_index
+    
+    cluster_gini_index[cluster] <- gini(data_table)
+  }
+  else {
+    cluster_simpson_div_index[cluster] <- NA
+    cluster_D50[cluster] <- NA
+    cluster_gini_index[cluster] <- NA
+  }
+}
+```
+
+
+```{r}
+cluster_D50_df <- as.data.frame(t(as.data.frame(cluster_D50)))
+colnames(cluster_D50_df) <- c("D50_Score")
+rownames(cluster_D50_df) <- paste0("cluster_", seq(0,16))
+cluster_D50_df$Cluster <- rownames(cluster_D50_df)
+
+
+ggplot(cluster_D50_df, aes(x = Cluster, y = D50_Score, color = Cluster)) +
+  geom_point(size = 3) +
+  labs(
+    title = "Dotplot of D50 Score by Cluster",
+    x = "Condition",
+    y = "DF 50 Score"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45))
+```
+
+
+```{r}
+cluster_simp_df <- as.data.frame(t(as.data.frame(cluster_simpson_div_index)))
+colnames(cluster_simp_df) <- c("simp_Score")
+rownames(cluster_simp_df) <- paste0("cluster_", seq(0,16))
+cluster_simp_df$Cluster <- rownames(cluster_simp_df)
+
+
+ggplot(cluster_simp_df, aes(x = Cluster, y = simp_Score, color = Cluster)) +
+  geom_point(size = 3) +
+  labs(
+    title = "Dotplot of Simpsons Diversity Score by Cluster",
+    x = "Condition",
+    y = "Simpsons Diversity Score"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45)) 
+```
+
+3 is very low here because it doesn't have any T clonotypes actually. It is only NK cells and doesn't contain many T clonotypes. 
+
+```{r}
+cluster_gini_df <- as.data.frame(t(as.data.frame(cluster_gini_index)))
+colnames(cluster_gini_df) <- c("gini_Score")
+rownames(cluster_gini_df) <- paste0("cluster_", seq(0,16))
+cluster_gini_df$Cluster <- rownames(cluster_gini_df)
+
+
+ggplot(cluster_gini_df, aes(x = Cluster, y = gini_Score, color = Cluster)) +
+  geom_point(size = 3) +
+  labs(
+    title = "Dotplot of Gini Index Score by Cluster",
+    x = "Condition",
+    y = "Gini Index Score"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45)) 
+```
+
+## 5.D Diversity Indexes for Each Condition by Cluster
+
+```{r}
+clono_ids <- function(x, y){
+    tryCatch(
+        {
+        clono_ids <- temp_seurat$clonotype_id[temp_seurat$Mouse_New == x & temp_seurat$RNA_clusters == y]
+        return(clono_ids)
+        },
+        error=function(e) {
+            message('An Error Occurred')
+            clono_ids <- 0
+            return(clono_ids)
+        },
+        warning=function(w) {
+            message('A Warning Occurred')
+            print(w)
+            return(NA)
+        }
+    )
+}
+```
+
+```{r}
+temp_seurat <- so_vdj[which(so_vdj$clonotype_id != "NA"),]
+mice <- c(sort(unique(temp_seurat$Mouse_New)))
+
+Idents(object = temp_seurat) <- "t_cell_clust"
+RNA_clusts <- sort(unique(temp_seurat$RNA_clusters))
+
+sample_gini_clust <- as.data.frame(matrix(ncol = length(mice), nrow = length(RNA_clusts)))
+rownames(sample_gini_clust) <- paste0("cluster_",RNA_clusts)
+colnames(sample_gini_clust) <- as.vector(mice)
+
+sample_simp_clust <- as.data.frame(matrix(ncol = length(mice), nrow = length(RNA_clusts)))
+rownames(sample_simp_clust) <- paste0("cluster_",RNA_clusts)
+colnames(sample_simp_clust) <- as.vector(mice)
+
+sample_d50_clust <- as.data.frame(matrix(ncol = length(mice), nrow = length(RNA_clusts)))
+rownames(sample_d50_clust) <- paste0("cluster_",RNA_clusts)
+colnames(sample_d50_clust) <- as.vector(mice)
+
+sample_gs_clust <- as.data.frame(matrix(ncol = length(mice), nrow = length(RNA_clusts)))
+rownames(sample_gs_clust) <- paste0("cluster_",RNA_clusts)
+colnames(sample_gs_clust) <- as.vector(mice)
+```
+
+```{r}
+for (sample_id in mice){
+  for (cluster in RNA_clusts){
+    #print(sample_id)
+    #print(cluster)
+    clonotype_ids <- clono_ids(sample_id, cluster)
+    #clonotype_ids <- temp_seurat$T_clonotype_id[temp_seurat$Sample == x & temp_seurat$t_cell_clust == y]
+    #print(clonotype_ids)
+    clonotype_ids <- clonotype_ids[!is.na(clonotype_ids)]
+    if (length(clonotype_ids) > 0) {
+    data <- table(clonotype_ids)
+    gini_val <- gini(data)
+    sample_gini_clust[paste0("cluster_",cluster),sample_id] <- as.numeric(gini_val)
+    
+    data1 <- as.data.frame(data)
+    sorted_data <- data1[order(-data1$Freq), ]
+    total_abundance <- sum(sorted_data$Freq)
+    cumulative_percentages <- cumsum(sorted_data$Freq) / total_abundance * 100
+    d50_index <- which.max(cumulative_percentages >= 50)
+    sample_d50_clust[paste0("cluster_",cluster),sample_id] <- as.numeric(d50_index)
+    
+    simp_index <- 1 - sum((sorted_data$Freq * (sorted_data$Freq - 1)) / (total_abundance * (total_abundance - 1)))
+    sample_simp_clust[paste0("cluster_",cluster),sample_id] <- as.numeric(simp_index)
+    
+    proportions <- data / sum(data)
+
+    # Calculate Gini-Simpson Index
+    sample_gs_clust[paste0("cluster_",cluster),sample_id] <- 1 - sum(proportions^2)
+    } 
+  }
+}
+
+sample_gini_clust["sample",] <- colnames(sample_gini_clust)
+sample_d50_clust["sample",] <- colnames(sample_d50_clust)
+sample_simp_clust["sample",] <- colnames(sample_simp_clust)
+sample_gs_clust["sample",] <- colnames(sample_gs_clust)
+
+df_long_gini <- pivot_longer(as.data.frame(t(sample_gini_clust)), cols = -sample, names_to = "Cluster", values_to = "Value")
+df_long_gini$Value <- as.numeric(df_long_gini$Value)
+df_long_gini$Infection <- substring(df_long_gini$sample, 0, 3)
+df_long_gini$inf_clust <- paste0(df_long_gini$Infection, ".", df_long_gini$Cluster)
+
+df_long_simp <- pivot_longer(as.data.frame(t(sample_simp_clust)), cols = -sample, names_to = "Cluster", values_to = "Value")
+df_long_simp$Value <- as.numeric(df_long_simp$Value)
+df_long_simp$Infection <- substring(df_long_simp$sample, 0, 3)
+df_long_simp$inf_clust <- paste0(df_long_simp$Infection, ".", df_long_simp$Cluster)
+
+df_long_d50 <- pivot_longer(as.data.frame(t(sample_d50_clust)), cols = -sample, names_to = "Cluster", values_to = "Value")
+df_long_d50$Value <- as.numeric(df_long_d50$Value)
+df_long_d50$Infection <- substring(df_long_d50$sample, 0, 3)
+df_long_d50$inf_clust <- paste0(df_long_d50$Infection, ".", df_long_d50$Cluster)
+
+df_long_gs <- pivot_longer(as.data.frame(t(sample_gs_clust)), cols = -sample, names_to = "Cluster", values_to = "Value")
+df_long_gs$Value <- as.numeric(df_long_gs$Value)
+df_long_gs$Infection <- substring(df_long_gs$sample, 0, 3)
+df_long_gs$inf_clust <- paste0(df_long_gs$Infection, ".", df_long_simp$Cluster)
+```
+
+```{r}
+# Choose which one you want
+#df_long <- df_long_simp[df_long_simp$Cluster != "cluster_16",]
+
+df_long <- df_long_gini[df_long_gini$Cluster != "cluster_16",]
+
+ggplot(df_long, aes(x = Cluster, y = Value, color = sample, shape = Infection)) +
+  geom_point() +
+  labs(x = "Cluster", y = "Gini Index Value") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("Gini Diversity Index by Cluster and Sample")
+
+ggplot(df_long, aes(x = Infection, y = Value, color = sample)) +
+  geom_boxplot() +
+  labs(
+    x = "Condition",
+    y = "Gini Index Value",
+    title = "Boxplot of Frequency by Cluster and Condition"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + facet_grid(. ~ Cluster) +
+  theme(legend.position = "top") + geom_pwc(aes(group = Infection), tip.length = 0, method = "t_test", label = "p.signif")
+```
+
+
+
+## Gini Calculation Practice
+
+```{r}
+data <- table(clono_ids("No Infection Male", 13)[!is.na(clono_ids("No Infection Male", 13))])
+library(abdiv)
+simpson(data)
+# Weirdly the simpson from this library gives the same as our gini-simpson from
+sample_gs_clust$`No Infection Male`
+
+library(DescTools)
+GiniSimpson(as.factor(data))
+
+# Simpsons based on :https://www.statology.org/simpsons-diversity-index/
+N = 8
+42
+0
+42 / (8*7)
+
+# BASED ON: https://www.alyoung.com/labs/results.html, https://goodcalculators.com/gini-coefficient-calculator/, and https://www.had2know.org/academics/gini-coefficient-calculator.html
+# OUR GINI IS CORRECT
+# OUR SIMPSONS INDEX SHOULD BE 1-sample_simp_clust
+
+```
+
+
+From these, I'm getting the idea that the gini index is highest for the infected mice in both Cluster 5 but also Cluster 13, especially for the Candida infected Female.
+
+
+## 5.F - Using DJVDJ Functions
+https://rnabioco.github.io/djvdj/articles/diversity.html
+```{r}
+div_fns <- list(
+  "simpson" = abdiv::simpson,
+  "shannon" = abdiv::shannon,
+  "pielou evenness" = abdiv::pielou_e
+)
+
+# Diversity Analysis
+#https://github.com/rnabioco/djvdj/blob/master/vignettes/diversity.Rmd
+
+so_vdj$temp <- paste(so_vdj$RNA_new, so_vdj$Mouse, sep = "_")
+
+so_vdj <- so_vdj |>
+  calc_diversity(
+    data_col    = "cdr3",
+    cluster_col = "temp",
+    #downsample  = TRUE,
+    #n_boots     = 50,
+    method  = div_fns
+  )
+
+so_vdj |>
+  plot_diversity(
+    data_col    = "cdr3",
+    cluster_col = "temp",
+    group_col = "RNA_new",
+    method      = div_fns
+  )
+
+so_vdj |>
+  plot_diversity(
+    data_col    = "cdr3",
+    cluster_col = "temp",
+    group_col = "Mouse",
+    method      = div_fns
+  )
+```
+
+```{r}
+so_vdj[which(so_vdj$chains == "TRA"),] |>
+  plot_diversity(
+    data_col    = "cdr3",
+    cluster_col = "temp",
+    group_col = "Mouse",
+    method      = div_fns
+  )
+
+so_vdj[which(so_vdj$chains == "TRA"),] |>
+  plot_diversity(
+    data_col    = "cdr3",
+    cluster_col = "temp",
+    method      = div_fns
+  )
+
+so_vdj[which(so_vdj$chains == "TRB"),] |>
+  plot_diversity(
+    data_col    = "cdr3",
+    cluster_col = "temp",
+    group_col = "Mouse",
+    method      = abdiv::shannon
+  )
+
+so_vdj[which(so_vdj$RNA_clusters == 5),] |>
+  plot_diversity(
+    data_col    = "clonotype_id",
+    cluster_col = "temp",
+    group_col = "Mouse",
+    method      = div_fns
+  )
+```
+
+```{r}
+so_vdj$temp2 <- paste(so_vdj$Organ, so_vdj$Mouse, sep = "_")
+
+so_vdj <- so_vdj |>
+  calc_diversity(
+    data_col    = "cdr3",
+    cluster_col = "temp2",
+    downsample  = TRUE,
+    #n_boots     = 50,
+    method  = div_fns
+  )
+
+so_vdj |>
+  plot_diversity(
+    data_col    = "cdr3",
+    cluster_col = "temp2",
+    group_col = "sample_name",
+    method      = div_fns
+  )
+```
+
+I'm not sure how the downsample = TRUE is affecting the results.
+
+Instead of downsampling I'd like to bootstrap instead. Therefore, resampling from cluster 16.
+
+```{r}
+so_similarity <- so_vdj |>
+    calc_similarity(
+        data_col    = "cdr3",
+        cluster_col = "RNA_new",
+        return_mat = TRUE
+    )
+
+so_vdj |>
+  plot_similarity(
+    data_col    = "cdr3",
+    cluster_col = "RNA_new",
+    method      = abdiv::horn_morisita,
+    rotate_labels = TRUE
+  )
+
+#The number of overlapping clonotypes is shown as the axis labels for each sample. The width of each link reflects the number of clonotypes shared between the samples. Labels can be rotated to eliminate overlapping text using the `rotate_labels` argument.
+```
+
+
+```{r}
+so_vdj <- so_vdj |>
+  calc_mds(
+    data_col    = "cdr3",
+    cluster_col = "sample_name",
+    method      = "horn_morisita"
+  )
+
+so_vdj |>
+  plot_mds(
+    data_col = "cdr3",
+    cluster_col = "sample_name"
+  )
+```
+
+Again, I'm not sure why the No infection is clustering together. This would make me thing that the No infected mouse has higher similarity in the TCRs cdr3 regions for all organs, than compared to either of the infected mice.
+
+If I'm fine subsetting the 7556 TCR samples to 6776 samples (only samples with RNA), then this is fine
+```
+IGT27_TCR$Mouse <- seurat_object[["Mouse"]][[1]][which(seurat_object$cell_barcode %in% IGT27_TCR$Barcode)]
+
+# Adding Organ
+IGT27_TCR$Organ <- seurat_object[["Organ"]][[1]][which(seurat_object$cell_barcode %in% IGT27_TCR$Barcode)]
+
+clonotypes_with_duplicatesOrgan <- IGT27_TCR %>%
+  group_by(clonotype) %>%
+  dplyr::filter(n_distinct(Organ) > 1)
+```
+
+```
+freq <- as.data.frame(table(IGT27_TCR$clonotype))
+colnames(freq)[colnames(freq) == 'Var1'] <- 'clonotype'
+freq$Proportion <- (freq$Freq / nrow(freq))
+colnames(freq)[colnames(freq) == 'Freq'] <- 'Clones'
+#merged_df <- merge(freq, IGT27_TCR[, c("JUNCTION_alpha", "AA.JUNCTION_alpha", "V.GENE_alpha", "J.GENE_alpha")], by = "clonotype", all.x = TRUE)
+```
+
+```{r}
+library(iNEXT)
+so_vdj |>
+     plot_rarefaction(
+         data_col    = "clonotype_id",
+         cluster_col = "Mouse_New",
+         method      = c("richness", "shannon", "invsimpson")
+     )
+
+so_vdj |>
+  plot_similarity(
+    data_col      = "clonotype_id",
+    cluster_col   = "sample_name",
+    group_col     = "Infection",
+    method        = "circos",
+    rotate_labels = TRUE
+  )
+```
+
+```{r}
+library(dbscan)
+library(igraph)
+
+so_cdr3_clust <- so_vdj |>
+  cluster_sequences(
+    data_col    = "cdr3",
+    method      = "louvain",   # clustering method
+    dist_method = "BLOSUM62",  # method for calculating sequence distances
+    resolution  = 0.5
+  )
+```
+
+```{r}
+clrs <- setNames(brewer.pal(11, "Paired"), 1:11)
+
+so_cdr3_clust |>
+  plot_scatter(
+    x = "cdr3_UMAP_1",
+    y = "cdr3_UMAP_2",
+    data_col = "cdr3_cluster_0.5"
+  )
+
+
+so_cdr3_clust |>
+  plot_frequency(
+    data_col    = "cdr3_cluster_0.5",
+    cluster_col = "sample_name"
+  )
+```
+
+```{r}
+saveRDS(so_vdj, file = "so_vdj.rds")
+saveRDS(seurat_object.TCR, file = "seurat_object.TCR.rds")
+```
+
+## 5.G Conversion to Anndata
+
+```{r}
+library(Seurat)
+library(SeuratDisk)
+library(SeuratData)
+
+SaveH5Seurat(so_vdj, filename = "so_vdj.h5Seurat")
+Convert("so_vdj.h5Seurat", dest = "h5ad")
+
+SaveH5Seurat(seurat_object_pseudo, filename = "seurat.h5Seurat")
+Convert("seurat.h5Seurat", dest = "h5ad")
+```
+
+# 6. Immunarch
+https://immunarch.com/articles/web_only/v3_basic_analysis.html
+```{r}
+library(immunarch)
+immdata <- repLoad("/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/TCR_data/filtered_contig_annotations.csv", .mode = "paired")
+```
+
+We may want to subselect by mouse here - using barcodes only for a particular mouse
+```{r}
+Idents(so_vdj) <- "cell_barcode"
+immdata_barcodes <- select_barcodes(immdata$data[[1]], Idents(so_vdj))
+```
+
+## 6.A Gini Index for Cluster in Each Mouse
+```{r}
+Idents(so_vdj) <- "Mouse_New"
+immdata$mouse_new <- Idents(so_vdj)
+immdata_mouse_new <- select_clusters(immdata, immdata$mouse_new, "mouse_new")
+
+Idents(so_vdj) <- "RNA_clusters"
+immdata$clust <- Idents(so_vdj)
+immdata_mouse_new_clust <- select_clusters(immdata_mouse_new, immdata$clust, "clust")
+
+library(stringr)
+
+div_gini <- repDiversity(immdata_mouse_new_clust$data, "gini")
+gini <- as.data.frame(div_gini)
+gini$mouse_clust <- rownames(gini)
+gini$clust <-  gsub("^(?:[^_]*_){4}(.*)", "\\1", gini$mouse_clust)
+gini$mouse <- gsub("^(?:[^_]*_){3}([^_]+)_.*", "\\1", gini$mouse_clust)
+
+ggplot(gini, aes(x = clust, y = V1, color = clust)) +
+  geom_boxplot() +
+  labs(
+    x = "Condition",
+    y = "Gini Index Value",
+    title = "Boxplot of Frequency by Cluster and Condition"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + facet_grid(. ~ mouse) 
+
+```
+
+Pretty similar to our gini indexes, not sure what is different between them. Need to check the 
+View(immdata_mouse_new_clust$data[["filtered_contig_annotations_No Infection Male_16"]])
+
+```{r}
+
+
+Idents(so_vdj) <- "sample_name"
+immdata$sample <- Idents(so_vdj)
+immdata_sample <- select_clusters(immdata, immdata$sample, "sample")
+
+Idents(so_vdj) <- "RNA_clusters"
+immdata$clust <- Idents(so_vdj)
+immdata_clust <- select_clusters(immdata, immdata$clust, "RNA_clust")
+
+immdata_clust2 <- select_clusters(immdata_sample, immdata$clust, "RNA_clust")
+
+```
+
+## 6.B Calculate clonotype overlap for Samples
+```{r}
+clonos <- c(names(rev(sort(table(immdata$data$filtered_contig_annotations$CDR3.aa[immdata$data$filtered_contig_annotations$chain == "TRA;TRB"])))[1:10]))
+
+repOverlap(immdata_sample$data) %>% vis()
+repDiversity(immdata_sample$data) %>% vis()
+trackClonotypes(immdata_sample$data, clonos, .col = "aa") %>% vis()
+
+kmers <- getKmers(immdata_sample$data, 5)
+vis(kmers)
+vis(kmers, .head = 10)
+kmer_profile(kmers)
+```
+
+## 6.C Calculate Overlap for Clusters
+```{r}
+
+repOverlap(immdata_clust$data) %>% vis()
+repDiversity(immdata_clust$data) %>% vis()
+trackClonotypes(immdata_clust$data, clonos, .col = "aa") %>% vis()
+
+```
+
+THIS IS COOL, CLUSTR 5 HAS MOST OVERLAP WITH CLUSTER 8 AND CLUSTER 11
+They talk about repertoire overlap here - https://www.tandfonline.com/doi/full/10.1080/2162402X.2020.1737369
+
+## 6.D Kmer analysis
+```{r}
+#print(immdata$data[[1]])
+kmers <- getKmers(immdata$data[[1]], 5)
+# Can also do immdata_sample$data[[1]] or immdata_sample[["data"]][["filtered_contig_annotations_No_colon_M"]] to get each sample
+kp <- kmer_profile(kmers)
+#.method = "freq" - position frequency matrix (PFM);
+#.method = "prob" - position probability matrix (PPM);
+#.method = "wei" - position weight matrix (PWM);
+#.method = "self" - self-information matrix.
+
+vis(kp)
+vis(kp, .plot = "seq")
+
+```
+
+
+```{r}
+imm_top <- repClonality(immdata_sample$data, .method = "top", .head = c(10, 100, 1000, 3000, 10000))
+
+vis(imm_top) + vis(imm_top, .by = "sample", .meta = immdata_sample$meta)
+```
+
+
+```{r}
+imm_gu <- geneUsage(immdata_sample$data, "hs.trbv", .norm = T)
+
+imm_gu_js <- geneUsageAnalysis(imm_gu, .method = "js", .verbose = F)
+imm_gu_cor <- geneUsageAnalysis(imm_gu, .method = "cor", .verbose = F)
+
+p1 <- vis(imm_gu_js, .title = "Gene usage JS-divergence", .leg.title = "JS", .text.size = 1.5)
+p2 <- vis(imm_gu_cor, .title = "Gene usage correlation", .leg.title = "Cor", .text.size = 1.5)
+
+p1 + p2
+```
+
+
+```{r}
+imm_gu_js[is.na(imm_gu_js)] <- 0
+
+vis(geneUsageAnalysis(imm_gu, "cosine+hclust", .verbose = F))
+
+imm_cl_pca <- geneUsageAnalysis(imm_gu, "js+pca+kmeans", .verbose = F)
+p1 <- vis(imm_cl_pca, .plot = "clust")
+```
+
+
+# 7. TCR Beta similarities 
+
+## 7.A Using Jaccard Similarity
+Like figure 4 in 
+https://www.nature.com/articles/s41591-023-02556-5#Fig5
+
+```{r}
+jaccard_similarity <- function(list1, list2) {
+    intersection <- length(intersect(list1, list2))
+    union <- length(union(list1, list2))
+    similarity <- (intersection / union) * 100
+    return(similarity)
+}
+```
+
+```{r}
+# All CDR3
+#so_vdj$cdr3[which(so_vdj$chains == "TRA;TRB" & so_vdj$sample_name == "Ca_colon_F")]
+tcrb_list <- list()
+tcrb_list_clust5 <- list()
+
+for (sample in unique(so_vdj$sample_name)){
+  tcrb_list[[sample]] <- as.list(gsub(".*?;", "", so_vdj$cdr3[which(so_vdj$chains == "TRA;TRB" & so_vdj$sample_name == sample)]))
+  tcrb_list_clust5[[sample]] <- as.list(gsub(".*?;", "", so_vdj$cdr3[which(so_vdj$chains == "TRA;TRB" & so_vdj$sample_name == sample & so_vdj$RNA_clusters == 5)]))
+}
+
+# Extract names and lists
+names <- names(tcrb_list_clust5)
+num_lists <- length(tcrb_list_clust5)
+
+# Calculate similarity ratio between each pair of lists
+similarities <- matrix(0, nrow = num_lists, ncol = num_lists, dimnames = list(names, names))
+similarities_clust5 <- similarities
+
+for (i in 1:num_lists) {
+    for (j in 1:num_lists) {
+        similarities[i, j] <- jaccard_similarity(tcrb_list[[i]], tcrb_list[[j]])
+        similarities_clust5[i, j] <- jaccard_similarity(tcrb_list_clust5[[i]], tcrb_list_clust5[[j]])
+    }
+}
+
+#pheatmap(similarities, display_numbers = TRUE)
+organs_order <- c("Lung", "Colon", "mLns")
+
+
+# For All Clusters
+
+sim_no_m <- melt(similarities[c("No_lung_M", "No_colon_M", "No_mLns_M"), c("No_lung_M", "No_colon_M", "No_mLns_M")])
+sim_ca_m <- melt(similarities[c("Ca_lung_M", "Ca_colon_M", "Ca_mLns_M"), c("Ca_lung_M", "Ca_colon_M", "Ca_mLns_M")])
+sim_ca_f <- melt(similarities[c("Ca_lung_F", "Ca_colon_F", "Ca_mLns_F"), c("Ca_lung_F", "Ca_colon_F", "Ca_mLns_F")])
+
+sim_no_m$Var1 <- recode(sim_no_m$Var1, "No_colon_M" = "Colon", "No_lung_M" = "Lung", "No_mLns_M" = "mLns")
+sim_no_m$Var2 <- recode(sim_no_m$Var2, "No_colon_M" = "Colon", "No_lung_M" = "Lung", "No_mLns_M" = "mLns")
+sim_ca_m$Var1 <- recode(sim_ca_m$Var1, "Ca_colon_M" = "Colon", "Ca_lung_M" = "Lung", "Ca_mLns_M"= "mLns")
+sim_ca_m$Var2 <- recode(sim_ca_m$Var2, "Ca_colon_M" = "Colon", "Ca_lung_M" = "Lung", "Ca_mLns_M" = "mLns")
+sim_ca_f$Var1 <- recode(sim_ca_f$Var1, "Ca_colon_F" = "Colon", "Ca_lung_F" = "Lung", "Ca_mLns_F" = "mLns")
+sim_ca_f$Var2 <- recode(sim_ca_f$Var2, "Ca_colon_F" = "Colon", "Ca_lung_F" = "Lung", "Ca_mLns_F" = "mLns")
+
+psim1 <- ggplot(sim_no_m, aes(Var1, Var2)) +
+  geom_tile(aes(fill = value), colour = "black") +
+  geom_text(aes(label = substring(value, 0, 4)), color = "white", size = 4) +
+  labs(title="Non-Infected Male - All Clusters", x ="", y = "") +
+  scale_fill_gradient(low = "lightblue", high = "navy")
+psim2 <- ggplot(sim_ca_f, aes(Var1, Var2)) +
+  geom_tile(aes(fill = value), colour = "black") +
+  geom_text(aes(label = substring(value, 0, 4)), color = "white", size = 4) +
+  labs(title="Candida Infected Female - All Clusters", x ="", y = "") +
+  scale_fill_gradient(low = "lightblue", high = "navy")
+psim3 <- ggplot(sim_ca_m, aes(Var1, Var2)) +
+  geom_tile(aes(fill = value), colour = "black") +
+  geom_text(aes(label = substring(value, 0, 4)), color = "white", size = 4) +
+  labs(title="Candida Infected Male - All Clusters", x ="", y = "") +
+  scale_fill_gradient(low = "lightblue", high = "navy")
+
+psim_list <- list(psim1, psim2, psim3)
+grid.arrange(grobs = psim_list, nrow = 3)
+
+```
+
+```{r}
+# For only Cluster 5
+sim_no_m <- melt(similarities_clust5[c("No_lung_M", "No_colon_M", "No_mLns_M"), c("No_lung_M", "No_colon_M", "No_mLns_M")])
+sim_ca_m <- melt(similarities_clust5[c("Ca_lung_M", "Ca_colon_M", "Ca_mLns_M"), c("Ca_lung_M", "Ca_colon_M", "Ca_mLns_M")])
+sim_ca_f <- melt(similarities_clust5[c("Ca_lung_F", "Ca_colon_F", "Ca_mLns_F"), c("Ca_lung_F", "Ca_colon_F", "Ca_mLns_F")])
+
+sim_no_m$Var1 <- recode(sim_no_m$Var1, "No_colon_M" = "Colon", "No_lung_M" = "Lung", "No_mLns_M" = "mLns")
+sim_no_m$Var2 <- recode(sim_no_m$Var2, "No_colon_M" = "Colon", "No_lung_M" = "Lung", "No_mLns_M" = "mLns")
+sim_ca_m$Var1 <- recode(sim_ca_m$Var1, "Ca_colon_M" = "Colon", "Ca_lung_M" = "Lung", "Ca_mLns_M"= "mLns")
+sim_ca_m$Var2 <- recode(sim_ca_m$Var2, "Ca_colon_M" = "Colon", "Ca_lung_M" = "Lung", "Ca_mLns_M" = "mLns")
+sim_ca_f$Var1 <- recode(sim_ca_f$Var1, "Ca_colon_F" = "Colon", "Ca_lung_F" = "Lung", "Ca_mLns_F" = "mLns")
+sim_ca_f$Var2 <- recode(sim_ca_f$Var2, "Ca_colon_F" = "Colon", "Ca_lung_F" = "Lung", "Ca_mLns_F" = "mLns")
+
+psim1 <- ggplot(sim_no_m, aes(Var1, Var2)) +
+  geom_tile(aes(fill = value), colour = "black") +
+  geom_text(aes(label = substring(value, 0, 4)), color = "white", size = 4) +
+  labs(title="Non-Infected Male - Cluster 5", x ="", y = "") +
+  scale_fill_gradient(low = "lightblue", high = "navy")
+psim2 <- ggplot(sim_ca_f, aes(Var1, Var2)) +
+  geom_tile(aes(fill = value), colour = "black") +
+  geom_text(aes(label = substring(value, 0, 4)), color = "white", size = 4) +
+  labs(title="Candida Infected Female - Cluster 5", x ="", y = "") +
+  scale_fill_gradient(low = "lightblue", high = "navy")
+psim3 <- ggplot(sim_ca_m, aes(Var1, Var2)) +
+  geom_tile(aes(fill = value), colour = "black") +
+  geom_text(aes(label = substring(value, 0, 4)), color = "white", size = 4) +
+  labs(title="Candida Infected Male - Cluster 5", x ="", y = "") +
+  scale_fill_gradient(low = "lightblue", high = "navy")
+
+psim_list <- list(psim1, psim2, psim3)
+grid.arrange(grobs = psim_list, nrow = 3)
+
+
+```
+
+# For TCRDist3
+
+```{r}
+#subject,epitope,count,v_a_gene,j_a_gene,cdr3_a_aa,cdr3_a_nucseq,v_b_gene,j_b_gene,cdr3_b_aa,cdr3_b_nucseq,clone_id
+mice <- c("mouse0082","mouse0080","mouse0081")
+ok <- list()
+
+for (mouse in mice){
+  TCR_Dist <- na.omit(IGT27_TCR[IGT27_TCR$Mouse == mouse,])
+  clonotypes <- TCR_Dist$clonotype
+  unique_clonotypes <- unique(clonotypes)
+  unique_clonotype_names <- paste0("clonotype_", seq_along(unique_clonotypes))
+  named_unique_clonotypes <- setNames(unique_clonotypes, unique_clonotype_names)
+  
+  matched_clonotype_ids <- unique_clonotype_names[match(clonotypes, unique_clonotypes)]
+  
+  mouse_matched <- paste0(mouse, matched_clonotype_ids)
+  
+  table_mouse <- table(mouse_matched)
+  
+  counts <- as.numeric(table_mouse[mouse_matched])
+  
+  
+  
+  data_tcrdist3 <- data.frame(subject = TCR_Dist$Mouse, epitope = TCR_Dist$Infection, count = counts, v_a_gene = paste0(TCR_Dist$V.GENE_alpha, "*01"), j_a_gene = paste0(TCR_Dist$J.GENE_alpha,"*01"), cdr3_a_aa = TCR_Dist$AA.JUNCTION_alpha, cdr3_a_nucseq = TCR_Dist$JUNCTION_alpha,
+v_b_gene = paste0(TCR_Dist$V.GENE_beta,"*01"), j_b_gene = paste0(TCR_Dist$J.GENE_beta,"*01"), cdr3_b_aa = TCR_Dist$AA.JUNCTION_beta, cdr3_b_nucseq = TCR_Dist$JUNCTION_beta, clone_id = mouse_matched)
+  
+  ok[[mouse]] <- as.data.frame(data_tcrdist3)
+}
+
+tcr3dist <- rbind(ok$mouse0082, ok$mouse0080, ok$mouse0081)
+
+write.csv(tcr3dist, "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/tcr_Packages/tcrDist/tcrdist.csv", row.names=TRUE)
+
+
+```
+
+```
+#tcr3dist <- na.omit(tcr3dist)
+
+lame <- na.omit(IGT27_TCR[IGT27_TCR$Mouse == "mouse0082",])
+lame1 <- na.omit(IGT27_TCR[IGT27_TCR$Mouse == "mouse0081",])
+lame0 <- na.omit(IGT27_TCR[IGT27_TCR$Mouse == "mouse0080",])
+
+length(lame0$clonotype) + length(lame1$clonotype) + length(lame$clonotype)
+
+# Why is the length of all the lames (which are all the unique clonotypes), the same as the toot? But the toot has so many NAs?
+
+```
+
+
+# GO Enrichment of Paired
+```{r}
+Idents(object = seurat_object.TCR) <- "paired_across_organ"
+
+seurat_object.TCR.paired <- subset(x = seurat_object.TCR, subset = (paired_across_organ == TRUE))
+
+Idents(seurat_object.TCR.dup) <- "Infection"
+DefaultAssay(seurat_object.TCR.dup) <- "RNA"
+dup_ca_markers <- FindMarkers(seurat_object.TCR.dup, ident.1 = "Ca", only.pos = TRUE,  min.pct = 0.05,logfc.threshold = 0.05)
+dup_ca_markers$entrezid <- mapIds(org.Mm.eg.db, keys = rownames(dup_ca_markers), column = "ENTREZID", keytype = "SYMBOL") # Could also use ENSEMBL instead of ENTREZ
+dup_ca_go_terms_bp <- enrichGO(dup_ca_markers$entrezid, "org.Mm.eg.db", keyType = "ENTREZID", ont = "BP", pvalueCutoff = 0.05, pAdjustMethod = "BH")
+dotplot(dup_ca_go_terms_bp, showCategory=10) + ggtitle("Duplicate infection")
+```
+
+
+# GO Enrichment of Duplicate
+
+```{r}
+Idents(object = seurat_object.TCR) <- "duplicate"
+
+seurat_object.TCR.dup <- subset(x = seurat_object.TCR, subset = (duplicate == TRUE))
+
+Idents(seurat_object.TCR.dup) <- "Infection"
+DefaultAssay(seurat_object.TCR.dup) <- "RNA"
+dup_ca_markers <- FindMarkers(seurat_object.TCR.dup, ident.1 = "Ca", only.pos = TRUE,  min.pct = 0.05,logfc.threshold = 0.05)
+dup_ca_markers$entrezid <- mapIds(org.Mm.eg.db, keys = rownames(dup_ca_markers), column = "ENTREZID", keytype = "SYMBOL") # Could also use ENSEMBL instead of ENTREZ
+dup_ca_go_terms_bp <- enrichGO(dup_ca_markers$entrezid, "org.Mm.eg.db", keyType = "ENTREZID", ont = "BP", pvalueCutoff = 0.05, pAdjustMethod = "BH")
+dotplot(dup_ca_go_terms_bp, showCategory=10) + ggtitle("Duplicate infection")
+```
+
+# 8. Gene/Protein Expression in Clusters of Interest
+
+Therefore, I devised this analysis:
+
+## 8.A By Cluster
+
+```{r}
+clusters <- sort(unique(seurat_object$RNA_clusters))
+all_ca_RNA <- c()
+all_ca_ADT <- c()
+
+for (clust in clusters){
+  print(clust)
+  # Candida Specific Markers
+  Idents(seurat_object) <- "RNA_clusters"
+  so_name <- paste0("so_cluster-",clust)
+  so_temp <- subset(x = seurat_object, idents = clust)
+
+  # RNA
+  DefaultAssay(so_temp) <- "RNA"
+  Idents(so_temp) <- "Infection"
+  try(RNA_temp_so <- FindMarkers(so_temp, ident.1 = "Ca", only.pos = TRUE,  min.pct = 0.05, logfc.threshold = 0.05))
+  RNA_temp_so$cluster <- clust
+  RNA_temp_so$gene <- rownames(RNA_temp_so)
+  RNA_temp_so <- RNA_temp_so[RNA_temp_so$p_val_adj < 0.05,]
+  all_ca_RNA <- rbind(all_ca_RNA, RNA_temp_so)
+  print("RNA done!")
+  
+  # ADT
+  DefaultAssay(so_temp) <- "ADT"
+  Idents(so_temp) <- "Infection"
+  try(ADT_temp_so <- FindMarkers(so_temp, ident.1 = "Ca", only.pos = TRUE,  min.pct = 0.05, logfc.threshold = 0.05))
+  ADT_temp_so$cluster <- clust
+  ADT_temp_so$gene <- rownames(ADT_temp_so)
+  ADT_temp_so <- ADT_temp_so[ADT_temp_so$p_val_adj < 0.05,]
+  all_ca_ADT <- rbind(all_ca_ADT, ADT_temp_so)
+  print("ADT done!")
+}
+```
+
+```{r}
+fig_dir <- ("/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Figures_Tables/")
+```
+
+```
+write.csv(all_ca_RNA, paste0(fig_dir, "Infected_DE_Genes_per_Clust.csv"), row.names=FALSE)
+write.csv(all_ca_ADT, paste0(fig_dir, "Infected_DE_Proteins_per_Clust.csv"), row.names=FALSE)
+```
+
+```{r}
+all_ca_RNA$entrezid <- mapIds(org.Mm.eg.db, keys = rownames(all_ca_RNA), column = "ENTREZID", keytype = "SYMBOL") # Could also use ENSEMBL instead of ENTREZ
+go_terms_bp_clust <- enrichGO(all_ca_RNA$entrezid[all_ca_RNA$cluster == clust], "org.Mm.eg.db", keyType = "ENTREZID", ont = "BP", pvalueCutoff = 0.05, pAdjustMethod = "BH")
+#dotplot(go_terms_bp_clust, showCategory=10) + ggtitle(paste0("Cluster ", clust, " Genes")
+```
+
+## 8.B By Organ and Cluster
+
+```{r}
+clusters <- sort(unique(seurat_object$RNA_clusters))
+organs <- sort(unique(seurat_object$Organ))
+all_ca_RNA_organ <- c()
+all_ca_ADT_organ <- c()
+
+for (clust in clusters){
+    print(clust)
+  # Candida Specific Markers
+  Idents(seurat_object) <- "RNA_clusters"
+  so_name <- paste0("so_cluster-",clust)
+  so_temp <- subset(x = seurat_object, idents = clust)
+  
+  for (organ in organs){
+    print(paste0(organ," and ", clust))
+    Idents(so_temp) <- "Organ"
+    try(so_temp_organ <- subset(x = so_temp, idents = organ))
+    
+    # RNA
+    DefaultAssay(so_temp_organ) <- "RNA"
+    Idents(so_temp_organ) <- "Infection"
+    try(RNA_temp_so_organ <- FindMarkers(so_temp_organ, ident.1 = "Ca", only.pos = TRUE,  min.pct = 0.05, logfc.threshold = 0.05))
+    if (nrow(RNA_temp_so_organ) > 0) {
+      RNA_temp_so_organ$gene <- rownames(RNA_temp_so_organ)
+      RNA_temp_so_organ$cluster <- clust
+      RNA_temp_so_organ$organ <- organ
+      RNA_temp_so_organ <- RNA_temp_so_organ[RNA_temp_so_organ$p_val_adj < 0.05,]
+      all_ca_RNA_organ <- rbind(all_ca_RNA_organ, RNA_temp_so_organ)
+    } else {
+      print("No RNA DEGs")
+    }
+    print("RNA done!")
+    
+    # ADT
+    DefaultAssay(so_temp_organ) <- "ADT"
+    Idents(so_temp_organ) <- "Infection"
+    try(ADT_temp_so_organ <- FindMarkers(so_temp_organ, ident.1 = "Ca", only.pos = TRUE,  min.pct = 0.05, logfc.threshold = 0.05))
+    if (nrow(ADT_temp_so_organ) > 0) {
+      ADT_temp_so_organ$gene <- rownames(ADT_temp_so_organ)
+      ADT_temp_so_organ$cluster <- clust
+      ADT_temp_so_organ$organ <- organ
+      ADT_temp_so_organ <- ADT_temp_so_organ[ADT_temp_so_organ$p_val_adj < 0.05,]
+      all_ca_ADT_organ <- rbind(all_ca_ADT_organ, ADT_temp_so_organ)
+    } else {
+      print("No ADT DEGs")
+    }
+    #all_ca_ADT_organ <- rbind(all_ca_ADT_organ, ADT_temp_so_organ)
+    print("ADT done!")
+  }
+}
+```
+
+```
+write.csv(all_ca_RNA_organ, paste0(fig_dir, "Infected_DE_Genes_per_ClustOrgan.csv"), row.names=FALSE)
+write.csv(all_ca_ADT_organ, paste0(fig_dir, "Infected_DE_Proteins_per_ClustOrgan.csv"), row.names=FALSE)
+```
+
+## 8.A/B -2Violin Plot for Naive Clusters
+
+```{r}
+# RNA Features
+DefaultAssay(seurat_object) <- "RNA"
+#VlnPlot(seurat_object, features = c("Ifi27l2a", "Slc15a2"), group.by = "RNA_clusters", split.by = "Infection", split.plot = TRUE)
+
+# For LUNG ONLY Clusters 0 and 1
+p1 <- VlnPlot(seurat_object.lung[,seurat_object.lung$RNA_clusters %in% c(0,1)], group.by = "RNA_clusters", split.by = "Mouse_New", features = "Slc15a2")
+p2 <- VlnPlot(seurat_object.lung[,seurat_object.lung$RNA_clusters %in% c(0,1)], group.by = "RNA_clusters", split.by = "Mouse_New", features = "Ifi27l2a")
+#+ stat_summary(fun.y = median, fun.ymin = median, fun.ymax = median, geom = "crossbar", width = 0.5)
+
+grid.arrange(grobs = list(p1,p2), ncol = 2, top = textGrob("Naive Clusters (0,1) - RNA Exp - Lung Only",gp=gpar(fontsize=20,font=3)))
+
+AverageExpression(seurat_object.lung[,seurat_object.lung$RNA_clusters == 0], group.by = "Infection", features = c("Ifi27l2a", "Slc15a2"))
+
+
+# For MLNS ONLY Clusters 0 and 1
+p1 <- VlnPlot(seurat_object.mlns[,seurat_object.mlns$RNA_clusters %in% c(2,3)], group.by = "RNA_clusters", split.by = "Mouse_New", features = "Slc15a2")
+p2 <- VlnPlot(seurat_object.mlns[,seurat_object.mlns$RNA_clusters %in% c(2,3)], group.by = "RNA_clusters", split.by = "Mouse_New", features = "Ifi27l2a")
+#+ stat_summary(fun.y = median, fun.ymin = median, fun.ymax = median, geom = "crossbar", width = 0.5)
+
+grid.arrange(grobs = list(p1,p2), ncol = 2, top = textGrob("Naive Clusters (2,3) - RNA Exp - mLns Only",gp=gpar(fontsize=20,font=3)))
+
+AverageExpression(seurat_object.lung[,seurat_object.lung$RNA_clusters == 0], group.by = "Infection", features = c("Ifi27l2a", "Slc15a2"))
+
+# FOR ALL ORGANS
+
+p1 <- VlnPlot(seurat_object[,seurat_object$RNA_clusters %in% c(0,1,2,3)], group.by = "RNA_clusters", split.by = "Mouse_New", features = "Slc15a2") + NoLegend()
+p2 <- VlnPlot(seurat_object[,seurat_object$RNA_clusters %in% c(0,1,2,3)], group.by = "RNA_clusters", split.by = "Mouse_New", features = "Ifi27l2a")
+#+ stat_summary(fun.y = median, fun.ymin = median, fun.ymax = median, geom = "crossbar", width = 0.5)
+ 
+grid.arrange(grobs = list(p1,p2), ncol = 2, top = textGrob("Naive Clusters (0,1,2,3) - RNA Exp - All Organs",gp=gpar(fontsize=20,font=3)))
+
+```
+
+
+```{r}
+# ADT Features
+DefaultAssay(seurat_object) <- "ADT"
+
+# For LUNG ONLY Clusters 0 and 1
+p1 <- VlnPlot(seurat_object.lung[,seurat_object.lung$RNA_clusters %in% c(0,1)], group.by = "RNA_clusters", split.by = "Mouse_New", features = "VISTA")
+p2 <- VlnPlot(seurat_object.lung[,seurat_object.lung$RNA_clusters %in% c(0,1)], group.by = "RNA_clusters", split.by = "Mouse_New", features = "SCA1")
+#+ stat_summary(fun.y = median, fun.ymin = median, fun.ymax = median, geom = "crossbar", width = 0.5)
+
+grid.arrange(grobs = list(p1,p2), ncol = 2, top = textGrob("Naive Clusters (0,1) - Protein Exp - Lung Only",gp=gpar(fontsize=20,font=3)))
+
+AverageExpression(seurat_object.lung[,seurat_object.lung$RNA_clusters == 0], group.by = "Infection", features = c("Ifi27l2a", "Slc15a2"))
+
+# For MLNS ONLY Clusters 0 and 1
+p1 <- VlnPlot(seurat_object.mlns[,seurat_object.mlns$RNA_clusters %in% c(2,3)], group.by = "RNA_clusters", split.by = "Mouse_New", features = "VISTA") + NoLegend()
+p2 <- VlnPlot(seurat_object.mlns[,seurat_object.mlns$RNA_clusters %in% c(2,3)], group.by = "RNA_clusters", split.by = "Mouse_New", features = "SCA1")
+#+ stat_summary(fun.y = median, fun.ymin = median, fun.ymax = median, geom = "crossbar", width = 0.5)
+
+grid.arrange(grobs = list(p1,p2), ncol = 2, top = textGrob("Naive Clusters (2,3) - ADT Exp - mLns Only",gp=gpar(fontsize=20,font=3)))
+
+AverageExpression(seurat_object.lung[,seurat_object.lung$RNA_clusters == 0], group.by = "Infection", features = c("VISTA", "SCA1"))
+
+# FOR ALL ORGANS
+
+p1 <- VlnPlot(seurat_object[,seurat_object$RNA_clusters %in% c(0,1,2,3)], group.by = "RNA_clusters", split.by = "Mouse_New", features = "CD45") + NoLegend()
+p2 <- VlnPlot(seurat_object[,seurat_object$RNA_clusters %in% c(0,1,2,3)], group.by = "RNA_clusters", split.by = "Mouse_New", features = "VISTA")  + NoLegend()
+p3 <- VlnPlot(seurat_object[,seurat_object$RNA_clusters %in% c(0,1,2,3)], group.by = "RNA_clusters", split.by = "Mouse_New", features = "SCA1")
+#+ stat_summary(fun.y = median, fun.ymin = median, fun.ymax = median, geom = "crossbar", width = 0.5)
+ 
+grid.arrange(grobs = list(p1,p2,p3), ncol = 3, top = textGrob("Naive Clusters (0,1,2,3) - ADT Exp - All Organs", gp=gpar(fontsize=20,font=3)))
+```
+
+## 8.C References:
+
+Immune-checkpoint proteins VISTA and PD-1 nonredundantly regulate murine T-cell responses 
+https://www.pnas.org/doi/10.1073/pnas.1420370112 - Immune-checkpoint proteins VISTA and PD-1 nonredundantly regulate murine T-cell responsesVISTA has been recently identified as a immune checkpoint molecule that suppresses T-cell activation
+
+VISTA is an activating receptor in human monocytes
+https://pubmed.ncbi.nlm.nih.gov/34106206/ - But also VISTA has been linked to activation
+
+The role of CD45 and CD45-associated molecules in T cell activation
+https://pubmed.ncbi.nlm.nih.gov/9429890/ - CD45 is essential for the activation of T cells via the TCR
+
+https://pubmed.ncbi.nlm.nih.gov/31641081/ - T cells require the protein tyrosine phosphatase CD45 to detect and respond to antigen because it activates the Src family kinase Lck, which phosphorylates the T cell antigen receptor (TCR) complex.
+
+The Interferon-Stimulated Gene Ifi27l2a Restricts West Nile Virus Infection and Pathogenesis in a Cell-Type- and Region-Specific Manner
+The mammalian host responds to viral infections by inducing expression of hundreds of interferon-stimulated genes (ISGs). While the functional significance of many ISGs has yet to be determined, their cell type and temporal nature of expression suggest ...
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4810731/ - Ifi27l2a shown to restrict infection in the CNS
+
+Cytokine- and TCR-Mediated Regulation of T Cell Expression of Ly6C and Sca-1
+https://pubmed.ncbi.nlm.nih.gov/29358280/ - Sca-1 has been used to identify CD8 memory stem cells (in our Naive population)
+
+ICOS Is an Indicator of T-cell–Mediated Response to Cancer Immunotherapy
+https://aacrjournals.org/cancerres/article/80/14/3023/640670/ICOS-Is-an-Indicator-of-T-cell-Mediated-Response - ICOS.CD278 detects activated T cells and an early benchmarking of immune response.
+
+

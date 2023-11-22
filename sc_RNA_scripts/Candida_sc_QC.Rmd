@@ -1,0 +1,565 @@
+---
+title: "Candida_sc_QC"
+author: "Nathan Morris"
+date: "2023-11-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# QC Visualization, Subsetting and Exploration
+
+# Data Import
+
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+library(Seurat)
+library(scater)
+library(dplyr)
+library(SingleR)
+library(celldex)
+library(scRNAseq)
+library(scran)
+library(gridExtra)
+
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+
+seurat_object <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT.Rds"))
+```
+
+```{r}
+# RNA
+dim(seurat_object[["RNA"]]) # We have 55847 genes and 11902 cells for the RNA assay 
+#head(colnames(seurat_object[["RNA"]])) # Cell barcodes are for identifying cells
+#head(rownames(seurat_object[["RNA"]])) # Gene names identify genes
+
+# Cite-Seq / ADT
+dim(seurat_object[["ADT"]]) # We have 128 Antibody Derived Tags and 11902 cells for Cite-Seq assay
+#head(colnames(seurat_object[["ADT"]])) # Cell barcodes are for identifying cells
+#head(rownames(seurat_object[["ADT"]])) # Antibody names identify antibodies used
+
+colnames(seurat_object@meta.data) # We have our identifiers here
+Idents(seurat_object) <- 'orig.ident' # Set the active identification through here
+```
+The RNA assay shows 11902 cells and 55847 genes
+
+The Cite-Seq/ADT assay shows 11902 cells and 128 Antibody Derived Tags
+
+The metadata identifiers for the seurat object are shown above.
+
+# Adding / Subsetting Metadata
+```{r}
+#colnames(seurat_object@meta.data) # Original metadata
+
+# Create Infection metadata
+seurat_object[['Infection']] <- seurat_object[['sample_name']]
+
+Idents(seurat_object) <- 'Infection'
+
+seurat_object <- RenameIdents(seurat_object, `No_colon_M` = 'No', `Ca_colon_M` = 'Ca', `Ca_colon_F` = 'Ca',
+                              `No_lung_M` = 'No', `Ca_lung_M` = 'Ca', `Ca_lung_F` = 'Ca', `No_mLns_M` = 'No', `Ca_mLns_M` = 'Ca',
+                              `Ca_mLns_F` = 'Ca')
+
+seurat_object[['Infection']] <- Idents(seurat_object)
+
+seurat_object$Infection <- factor(seurat_object$Infection, levels = c("No", "Ca"))
+
+# Create Organ metadata
+seurat_object[['Organ']] <- seurat_object[['sample_name']]
+
+Idents(seurat_object) <- 'Organ'
+
+seurat_object <- RenameIdents(seurat_object, `No_colon_M` = 'Colon', `Ca_colon_M` = 'Colon', `Ca_colon_F` = 'Colon',
+                              `No_lung_M` = 'Lung', `Ca_lung_M` = 'Lung', `Ca_lung_F` = 'Lung', `No_mLns_M` = 'mLns', `Ca_mLns_M` = 'mLns',
+                              `Ca_mLns_F` = 'mLns')
+
+seurat_object[['Organ']] <- Idents(seurat_object)
+
+seurat_object$Organ <- factor(seurat_object$Organ, levels = c("Colon", "Lung", "mLns"))
+
+# Creating a Sex metadata
+seurat_object[['Sex']] <- seurat_object[['sample_name']]
+
+Idents(seurat_object) <- 'Sex'
+
+seurat_object <- RenameIdents(seurat_object, `No_colon_M` = 'Male', `Ca_colon_M` = 'Male', `Ca_colon_F` = 'Female',
+                              `No_lung_M` = 'Male', `Ca_lung_M` = 'Male', `Ca_lung_F` = 'Female', `No_mLns_M` = 'Male', `Ca_mLns_M` = 'Male',
+                              `Ca_mLns_F` = 'Female')
+
+seurat_object[['Sex']] <- Idents(seurat_object)
+
+seurat_object$Sex <- factor(seurat_object$Sex, levels = c("Male", "Female"))
+
+# Creating a Mouse metadata
+seurat_object[['Mouse']] <- seurat_object[['sample_name']]
+
+Idents(seurat_object) <- 'Mouse'
+
+seurat_object <- RenameIdents(seurat_object, `No_colon_M` = 'mouse0082', `Ca_colon_M` = 'mouse0080', `Ca_colon_F` = 'mouse0081',
+                              `No_lung_M` = 'mouse0082', `Ca_lung_M` = 'mouse0080', `Ca_lung_F` = 'mouse0081', `No_mLns_M` = 'mouse0082', `Ca_mLns_M` = 'mouse0080',
+                              `Ca_mLns_F` = 'mouse0081')
+
+seurat_object[['Mouse']] <- Idents(seurat_object)
+
+seurat_object$Mouse <- factor(seurat_object$Mouse, levels = c('mouse0082', 'mouse0080', 'mouse0081'))
+
+# Mouse_new
+
+seurat_object[['Mouse_New']] <- seurat_object[['Mouse']]
+
+Idents(seurat_object) <- 'Mouse_New'
+
+seurat_object <- RenameIdents(seurat_object, `mouse0082` = 'No Infection Male', `mouse0081` = 'Infected Female', `mouse0080` = 'Infected Male')
+
+seurat_object[['Mouse_New']] <- Idents(seurat_object)
+
+seurat_object$Mouse_New <- factor(seurat_object$Mouse_New, levels = c('No Infection Male', 'Infected Female', 'Infected Male'))
+
+# Reset the active identifier
+Idents(seurat_object) <- 'sample_name'
+
+print("Here we added more characterizing metafeatures to the object for analysis. Now the list of features is: ")
+print(colnames(seurat_object@meta.data))
+```
+Remove cells without Mouse/Organ information
+```{r}
+table(seurat_object$Mouse %in% c('mouse0082', 'mouse0080', 'mouse0081'))
+table(seurat_object$Organ %in% c('Lung', "mLns", "Colon"))
+```
+
+```{r}
+seurat_object <- seurat_object[,seurat_object$Mouse %in% c('mouse0082', 'mouse0080', 'mouse0081'),]
+```
+
+# Save New Metadata
+```{r}
+saveRDS(seurat_object, file = paste0(data_dir, "dataset_clean_scRNA_ADT_new_metadata.rds"))
+```
+
+# MAYBE WE DON'T WANT TO DO THIS - NORMALLY BAD WITH PATIENT DATA
+```
+# Removing cells with incomplete metadata
+bad_cells <- rownames(seurat_object@meta.data[!complete.cases(seurat_object@meta.data), ])
+seurat_object <- seurat_object[,!colnames(seurat_object) %in% bad_cells]
+#length(bad_cells) # Removes 72 cells
+```
+
+
+Removing cells that have incomplete cases. This removed 72 "bad" cells from the seurat object.
+
+Identifying RNA Outliers
+```{r}
+# RNA QC
+#summary(colSums(seurat_object[["RNA"]]))
+
+# nCount_RNA - the total number of molecules detected within a cell
+# nFeature_RNA - the number of genes detected within a cell
+
+hist(colSums(seurat_object[["RNA"]]), xlab = "Sum of Columns - RNA", ylab = "Frequency", col = "blue")
+
+hist(seurat_object$nCount_RNA, xlab = "nCount RNA - number of molecules/cell", ylab = "Frequency", col = "blue")
+
+hist(seurat_object$nFeature_RNA, xlab = "nFeature RNA - number of unique genes detected/cell", ylab = "Frequency", col = "blue")
+
+# How does nCount_RNA differ from the colSums(seurat_object[["RNA"]])??
+
+# Identify outliers based on unique genes and counts using the log-transformed nCount_RNA and nFeature_RNA that are more than 3 MADs (median absolute deviations) away from the median.
+qc.nCount_RNA <- isOutlier(seurat_object$nCount_RNA, log=TRUE, type="both")
+paste("The thresholds for 3 MADs from the median for nCount_RNA are: ")
+attr(qc.nCount_RNA, "thresholds")
+
+qc.nFeature_RNA  <- isOutlier(seurat_object$nFeature_RNA, log=TRUE, type="both")
+paste("The thresholds for 3 MADs from the median for nFeature_RNA are: ")
+attr(qc.nFeature_RNA, "thresholds")
+
+paste0("The total number of cells removed using these outliers are: ", ncol(seurat_object) - ncol(subset(seurat_object, subset = nCount_RNA >= attr(qc.nCount_RNA, "thresholds")["lower"] & nCount_RNA <= attr(qc.nCount_RNA, "thresholds")["higher"] & nFeature_RNA >= attr(qc.nFeature_RNA, "thresholds")["lower"] & nFeature_RNA <= attr(qc.nFeature_RNA, "thresholds")["higher"])))
+```
+Check for Mitochondrial Genes in RNA
+```{r}
+# Check for mitochondrial genes - No mitochondrial genes
+DefaultAssay(object = seurat_object) <- "RNA"
+print("The number of mitochondrial genes in the RNA assay is: ")
+length(grep("^MT", lapply(rownames(seurat_object[["RNA"]]), toupper))) # There are 113 mitochondrial genes
+
+seurat_object[["percent.mt"]] <- PercentageFeatureSet(seurat_object, pattern = "^mt-")
+```
+
+Checking RNA Outliers Visually
+```{r}
+# Graph / Visual QC
+
+# Feature and Count for RNA
+
+p1 <- VlnPlot(seurat_object, features = c("nFeature_RNA"), group.by = "sample_name", assay = "RNA") + geom_hline(yintercept = c(attr(qc.nFeature_RNA, "thresholds")["lower"], attr(qc.nFeature_RNA, "thresholds")["higher"]), linetype = "dashed", color = "red") + ggtitle("nFeature_RNA with Outliers") + theme(legend.position = "none")
+
+p2 <- VlnPlot(seurat_object, features = c("nCount_RNA"), group.by = "sample_name", assay = "RNA") + geom_hline(yintercept = c(attr(qc.nCount_RNA, "thresholds")["lower"], attr(qc.nCount_RNA, "thresholds")["higher"]), linetype = "dashed", color = "red") + ggtitle("nCount_RNA with Outliers") + theme(legend.position = "none")
+
+p3 <- VlnPlot(seurat_object, features = c("percent.mt"), group.by = "sample_name", assay = "RNA") + ggtitle("PercentMito_RNA with Outliers")
+
+grid.arrange(p1, p2, p3, ncol = 3)
+```
+
+Subsetting Object based on RNA Outliers
+```{r}
+seurat_object <- subset(seurat_object, subset = nCount_RNA >= attr(qc.nCount_RNA, "thresholds")["lower"] & nCount_RNA <= attr(qc.nCount_RNA, "thresholds")["higher"] & nFeature_RNA >= attr(qc.nFeature_RNA, "thresholds")["lower"] & nFeature_RNA <= attr(qc.nFeature_RNA, "thresholds")["higher"])
+
+paste0("The new range of the nCount_RNA in cells is: ", range(seurat_object$nCount_RNA))
+paste0("The new range of the nFeature_RNA in cells is: ", range(seurat_object$nFeature_RNA))
+
+paste0("Now we are left with this number of cells: ", ncol(seurat_object))
+```
+
+Check for Mitochondrial Genes in Cite-Seq / ADT
+```{r}
+# Check for mitochondrial genes - No mitochondrial genes
+print("The number of mitochondrial genes in the RNA assay is: ")
+length(grep("^MT", lapply(rownames(seurat_object[["ADT"]]), toupper))) # There are no mitochondrial genes in the Cite-Seq Assay
+```
+
+Identifying Cite-Seq / ADT Outliers
+```{r}
+# Cite-Seq / ADT Outliers
+#summary(colSums(seurat_object[["ADT"]]))
+hist(colSums(seurat_object[["ADT"]]), xlab = "Sum of Columns - ADT", ylab = "Frequency", col = "blue")
+
+hist(seurat_object$nCount_ADT, xlab = "nCount ADT - number of antibodies/cell", ylab = "Frequency", col = "blue")
+
+hist(seurat_object$nFeature_ADT, xlab = "nFeature ADT - number of unique antibodies detected/cell", ylab = "Frequency", col = "blue")
+
+# Identify outliers based on unique genes and counts using the log-transformed nCount_ADT and nFeature_ADT that are more than 3 MADs (median absolute deviations) away from the median.
+qc.nCount_ADT <- isOutlier(seurat_object$nCount_ADT, log=TRUE, type="both")
+paste("The thresholds for 3 MADs from the median for nCount_ADT are: ")
+attr(qc.nCount_ADT, "thresholds")
+
+qc.nFeature_ADT  <- isOutlier(seurat_object$nFeature_ADT, log=TRUE, type="both")
+paste("The thresholds for 3 MADs from the median for nFeature_ADT are: ")
+attr(qc.nFeature_ADT, "thresholds")
+
+# Shows that 327 cells would be removed by this
+paste0("The total number of cells removed using these outliers are: ", ncol(seurat_object) - ncol(subset(seurat_object, subset = nCount_ADT >= attr(qc.nCount_ADT, "thresholds")["lower"] & nCount_ADT <= attr(qc.nCount_ADT, "thresholds")["higher"] & nFeature_ADT >= attr(qc.nFeature_ADT, "thresholds")["lower"] & nFeature_ADT <= attr(qc.nFeature_ADT, "thresholds")["higher"])))
+```
+
+Checking ADT Outliers Visually
+```{r}
+# Graph / Visual QC
+
+# Feature and Count for RNA
+
+p1 <- VlnPlot(seurat_object, features = c("nFeature_ADT"), group.by = "sample_name", assay = "ADT") + geom_hline(yintercept = c(attr(qc.nFeature_ADT, "thresholds")["lower"], attr(qc.nFeature_ADT, "thresholds")["higher"]), linetype = "dashed", color = "red") + ggtitle("nFeature_ADT with Outliers") + theme(legend.position = "none")
+
+p2 <- VlnPlot(seurat_object, features = c("nCount_ADT"), group.by = "sample_name", assay = "ADT") + geom_hline(yintercept = c(attr(qc.nCount_ADT, "thresholds")["lower"], attr(qc.nCount_ADT, "thresholds")["higher"]), linetype = "dashed", color = "red") + ggtitle("nCount_ADT with Outliers")
+
+grid.arrange(p1, p2, ncol = 2)
+```
+
+Post-normalization and scaling, everything looks pretty similar and normally distributed. However, the only thing that doesn't look similar across samples is the number of features for the ADT/Cite-Seq assay in comparison of each organ. nCount_ADT is the total number of antibodies found on a cell. nFeature_ADT is the number of unique antibodies detected. Both seem to have a higher average in the lung compared to the colon and mLns.
+
+Subsetting Object based on Cite-Seq / ADT Outliers
+```{r}
+seurat_object <- subset(seurat_object, subset = nCount_ADT >= attr(qc.nCount_ADT, "thresholds")["lower"] & nCount_ADT <= attr(qc.nCount_ADT, "thresholds")["higher"] & nFeature_ADT >= attr(qc.nFeature_ADT, "thresholds")["lower"] & nFeature_ADT <= attr(qc.nFeature_ADT, "thresholds")["higher"])
+
+paste0("The new range of the nCount_ADT in cells is: ", range(seurat_object$nCount_ADT))
+paste0("The new range of the nCount_ADT in cells is: ", range(seurat_object$nFeature_ADT))
+
+paste0("Now we are left with this number of cells: ", ncol(seurat_object))
+```
+
+Check for Mitochondrial Genes in ADT
+```{r}
+# Mitochondrial reads
+print("The number of mitochondrial proteins in the ADT assay is: ")
+grep("^MT", rownames(seurat_object[["ADT"]]))
+#seurat_object[["percent.mt"]] <- PercentageFeatureSet(seurat_object, pattern = "^MT-")
+#table(PercentageFeatureSet(seurat_object, pattern = "^MT-", assay = "ADT"))
+
+seurat_object[["percent.mt"]] <- PercentageFeatureSet(seurat_object, pattern = "^MT-")
+```
+
+Question - Based on the fact that biological data should be distributed normally, are we okay with using the median +/- 3*STDEV as the cutoff for outlier cells within both the RNA and ADT?
+
+Additional QC Plots
+```{r}
+Idents(seurat_object) <- 'sample_name'
+
+RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 1)
+
+Idents(seurat_object) <- 'Organ'
+
+RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 1)
+
+Idents(seurat_object) <- 'Mouse'
+
+RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 1)
+
+Idents(seurat_object) <- 'Infection'
+
+RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 1)
+
+FeatureScatter(seurat_object, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+FeatureScatter(seurat_object, feature1 = "nCount_ADT", feature2 = "nFeature_ADT")
+```
+
+# Normalization Check
+```{r}
+# For RNA
+# Counts gives the original sparse matrix, Data gives us the log normalized versions
+# Using @x gives us the dense matrices
+# Since they are not equal, data has been normalized
+paste0("The number of equivalent numbers between the counts and data matrix is as follows. If zero, data has been normalized for RNA (counts != data): ", sum(seurat_object[['RNA']]@counts@x == seurat_object[['RNA']]@data@x))
+
+# Additional check - no integers here, so must be already normalized
+print("Additional check - no integers in the RNA data matrix, so it has been normalized")
+seurat_object[['RNA']]@data[30:40,30:40]
+#quantile(seurat_object[['RNA']]@data)
+
+# For ADT
+#print("If zero, data has been normalized for ADT (counts == data): ")
+print("ADT counts are below: ")
+seurat_object[['ADT']]@counts[10:13,10:13]
+#quantile(seurat_object[['ADT']]@counts)
+print("ADT data (normalized) is below: ")
+seurat_object[['ADT']]@data[10:13,10:13]
+#quantile(seurat_object[['ADT']]@data)
+
+# Additional check - no integers here, so must be already normalized
+print("As we can see, there are no integers in the ADT data matrix, so it has been normalized")
+#seurat_object[['ADT']]@data[1:3,1:3]
+
+# Normalize if need be
+#seurat_object <- NormalizeData(object = seurat_object, assay = "RNA, normalization.method = "LogNormalize", scale.factor = 1e4)
+#seurat_object <- NormalizeData(object = seurat_object, assay = "ADT", normalization.method = "CLR")
+#seurat_object <- ScaleData(seurat_object, assay = "ADT")
+```
+
+```{r}
+# RNA
+cluster_counts_RNA <- seurat_object@meta.data %>%
+  count(RNA_clusters)
+
+percent_comp_sample_RNA <- (seurat_object@meta.data %>%
+  count(RNA_clusters, sample_name)) %>%
+  left_join(cluster_counts_RNA, by = "RNA_clusters") %>%
+  mutate(percentage = (n.x / n.y) * 100)
+
+colnames(percent_comp_sample_RNA)[colnames(percent_comp_sample_RNA) == 'n.x'] <- 'Count_per_Sample'
+colnames(percent_comp_sample_RNA)[colnames(percent_comp_sample_RNA) == 'n.y'] <- 'Count_per_Cluster'
+
+percent_comp_organ_RNA <- (seurat_object@meta.data %>%
+  count(RNA_clusters, Organ)) %>%
+  left_join(cluster_counts_RNA, by = "RNA_clusters") %>%
+  mutate(percentage = (n.x / n.y) * 100)
+
+colnames(percent_comp_organ_RNA)[colnames(percent_comp_organ_RNA) == 'n.x'] <- 'Count_per_Sample'
+colnames(percent_comp_organ_RNA)[colnames(percent_comp_organ_RNA) == 'n.y'] <- 'Count_per_Cluster'
+
+percent_comp_mouse_RNA <- (seurat_object@meta.data %>%
+  count(RNA_clusters, Mouse)) %>%
+  left_join(cluster_counts_RNA, by = "RNA_clusters") %>%
+  mutate(percentage = (n.x / n.y) * 100)
+
+colnames(percent_comp_mouse_RNA)[colnames(percent_comp_mouse_RNA) == 'n.x'] <- 'Count_per_Organ'
+colnames(percent_comp_mouse_RNA)[colnames(percent_comp_mouse_RNA) == 'n.y'] <- 'Count_per_Cluster'
+
+percent_comp_infection_RNA <- (seurat_object@meta.data %>%
+  count(RNA_clusters, Infection)) %>%
+  left_join(cluster_counts_RNA, by = "RNA_clusters") %>%
+  mutate(percentage = (n.x / n.y) * 100)
+
+colnames(percent_comp_infection_RNA)[colnames(percent_comp_infection_RNA) == 'n.x'] <- 'Count_per_Infection'
+colnames(percent_comp_infection_RNA)[colnames(percent_comp_infection_RNA) == 'n.y'] <- 'Count_per_Cluster'
+
+# STACKED BARPLOT - Cluster composition by Sample
+barplot_sample <- ggplot(percent_comp_sample_RNA, aes(x = RNA_clusters, y = percentage, fill = sample_name)) + geom_bar(stat = "identity", position = "fill") +
+  labs(x = "Cluster", y = "Percentage Composition of RNA", fill = "Sample") + ggtitle("Cluster composition by sample") +
+  theme_minimal()
+print(barplot_sample)
+
+# SEPARATE BARPLOT - Cluster composition by Sample
+# To not include cluster 16 - use the below instead of just percent_comp_sample_RNA
+# percent_comp_sample_RNA[(percent_comp_sample_RNA$RNA_clusters %in% 0:15), ]
+ggplot(percent_comp_sample_RNA, aes(x = RNA_clusters, y = percentage, fill = sample_name)) + geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Cluster", y = "Percentage Composition of RNA") +
+  scale_fill_discrete(name = "Sample") +
+  theme_minimal()
+
+# STACKED BARPLOT - Cluster composition by Mouse
+barplot_mouse <- ggplot(percent_comp_mouse_RNA, aes(x = RNA_clusters, y = percentage, fill = Mouse)) +
+  geom_bar(stat = "identity", position = "fill") +
+  labs(x = "Cluster", y = "Percentage Composition of RNA", fill = "Mouse") + ggtitle("Cluster composition by mouse") +
+  theme_minimal()
+print(barplot_mouse)
+
+# SEPARATE BARPLOT - Cluster composition by Mouse
+# To not include cluster 16 - use the below instead of just percent_comp_sample_RNA
+# percent_comp_mouse_RNA[(percent_comp_mouse_RNA$RNA_clusters %in% 0:15), ]
+ggplot(percent_comp_mouse_RNA, aes(x = RNA_clusters, y = percentage, fill = Mouse)) + geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Cluster", y = "Percentage Composition of RNA") +
+  scale_fill_discrete(name = "Mouse") +
+  theme_minimal()
+
+# STACKED BARPLOT - Cluster composition by Organ
+barplot_organ <- ggplot(percent_comp_organ_RNA, aes(x = RNA_clusters, y = percentage, fill = Organ)) +
+  geom_bar(stat = "identity", position = "fill") +
+  labs(x = "Cluster", y = "Percentage Composition of RNA", fill = "Organ") + ggtitle("Cluster composition by organ") +
+  theme_minimal()
+print(barplot_organ)
+
+# SEPARATE BARPLOT - Cluster composition by Organ
+# To not include cluster 16 - use the below instead of just percent_comp_sample_RNA
+# percent_comp_organ_RNA[(percent_comp_organ_RNA$RNA_clusters %in% 0:15), ]
+ggplot(percent_comp_organ_RNA, aes(x = RNA_clusters, y = percentage, fill = Organ)) + geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Cluster", y = "Percentage Composition of RNA") +
+  scale_fill_discrete(name = "Organ") +
+  theme_minimal()
+
+# STACKED BARPLOT - Cluster composition by Infection
+barplot_infection <- ggplot(percent_comp_infection_RNA, aes(x = RNA_clusters, y = percentage, fill = Infection)) +
+  geom_bar(stat = "identity", position = "fill") +
+  labs(x = "Cluster", y = "Percentage Composition of RNA", fill = "Infection") + ggtitle("Cluster composition by organ") +
+  theme_minimal()
+print(barplot_infection)
+
+# SEPARATE BARPLOT - Cluster composition by Infection
+# To not include cluster 16 - use the below instead of just percent_comp_sample_RNA
+# percent_comp_infection_RNA[(percent_comp_infection_RNA$RNA_clusters %in% 0:15), ]
+ggplot(percent_comp_infection_RNA, aes(x = RNA_clusters, y = percentage, fill = Infection)) + geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Cluster", y = "Percentage Composition of RNA") +
+  scale_fill_discrete(name = "Infection") +
+  theme_minimal()
+
+# Previously we also subset by Organ and by Infection
+# Therefore, you could see for No infection, which Organ makes up the cluster
+# You could also see for each Organ, which mouse makes up the cluster
+# Removed these plots for now
+
+# Can also get total Counts_per_Sample easily instead of only % composition
+```
+
+Here, would we expect the percent composition for the Male and Female mouse with Ca infection to be similar? For colon, cluster 4 has significantly more female colon cells than any other cell. Although, these values are very variable. mLns seems very consistent across all clusters, except cluster 10 and cluster 15. For lung, the Male with Ca infection seems to be very variable.
+
+```{r}
+# ADT
+cluster_counts_ADT <- seurat_object@meta.data %>%
+  count(Protein_clusters)
+
+percent_comp_sample_ADT <- (seurat_object@meta.data %>%
+  count(Protein_clusters, sample_name)) %>%
+  left_join(cluster_counts_ADT, by = "Protein_clusters") %>%
+  mutate(percentage = (n.x / n.y) * 100)
+
+colnames(percent_comp_sample_ADT)[colnames(percent_comp_sample_ADT) == 'n.x'] <- 'Count_per_Sample'
+colnames(percent_comp_sample_ADT)[colnames(percent_comp_sample_ADT) == 'n.y'] <- 'Count_per_Cluster'
+
+percent_comp_organ_ADT <- (seurat_object@meta.data %>%
+  count(Protein_clusters, Organ)) %>%
+  left_join(cluster_counts_ADT, by = "Protein_clusters") %>%
+  mutate(percentage = (n.x / n.y) * 100)
+
+colnames(percent_comp_organ_ADT)[colnames(percent_comp_organ_ADT) == 'n.x'] <- 'Count_per_Sample'
+colnames(percent_comp_organ_ADT)[colnames(percent_comp_organ_ADT) == 'n.y'] <- 'Count_per_Cluster'
+
+percent_comp_mouse_ADT <- (seurat_object@meta.data %>%
+  count(Protein_clusters, Mouse)) %>%
+  left_join(cluster_counts_ADT, by = "Protein_clusters") %>%
+  mutate(percentage = (n.x / n.y) * 100)
+
+colnames(percent_comp_mouse_ADT)[colnames(percent_comp_mouse_ADT) == 'n.x'] <- 'Count_per_Organ'
+colnames(percent_comp_mouse_ADT)[colnames(percent_comp_mouse_ADT) == 'n.y'] <- 'Count_per_Cluster'
+
+percent_comp_infection_ADT <- (seurat_object@meta.data %>%
+  count(Protein_clusters, Infection)) %>%
+  left_join(cluster_counts_ADT, by = "Protein_clusters") %>%
+  mutate(percentage = (n.x / n.y) * 100)
+
+colnames(percent_comp_infection_ADT)[colnames(percent_comp_infection_ADT) == 'n.x'] <- 'Count_per_Infection'
+colnames(percent_comp_infection_ADT)[colnames(percent_comp_infection_ADT) == 'n.y'] <- 'Count_per_Cluster'
+
+# STACKED BARPLOT - Cluster composition by Sample
+barplot_sample <- ggplot(percent_comp_sample_ADT, aes(x = Protein_clusters, y = percentage, fill = sample_name)) + geom_bar(stat = "identity", position = "fill") +
+  labs(x = "Cluster", y = "Percentage Composition of ADT", fill = "Sample") + ggtitle("Cluster composition by sample") +
+  theme_minimal()
+print(barplot_sample)
+
+# SEPARATE BARPLOT - Cluster composition by Sample
+# To not include cluster 16 - use the below instead of just percent_comp_sample_ADT
+# percent_comp_sample_ADT[(percent_comp_sample_ADT$Protein_clusters %in% 0:15), ]
+ggplot(percent_comp_sample_ADT, aes(x = Protein_clusters, y = percentage, fill = sample_name)) + geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Cluster", y = "Percentage Composition of ADT") +
+  scale_fill_discrete(name = "Sample") +
+  theme_minimal()
+
+# STACKED BARPLOT - Cluster composition by Mouse
+barplot_mouse <- ggplot(percent_comp_mouse_ADT, aes(x = Protein_clusters, y = percentage, fill = Mouse)) +
+  geom_bar(stat = "identity", position = "fill") +
+  labs(x = "Cluster", y = "Percentage Composition of ADT", fill = "Mouse") + ggtitle("Cluster composition by mouse") +
+  theme_minimal()
+print(barplot_mouse)
+
+# SEPARATE BARPLOT - Cluster composition by Mouse
+# To not include cluster 16 - use the below instead of just percent_comp_sample_ADT
+# percent_comp_mouse_ADT[(percent_comp_mouse_ADT$Protein_clusters %in% 0:15), ]
+ggplot(percent_comp_mouse_ADT, aes(x = Protein_clusters, y = percentage, fill = Mouse)) + geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Cluster", y = "Percentage Composition of ADT") +
+  scale_fill_discrete(name = "Mouse") +
+  theme_minimal()
+
+# STACKED BARPLOT - Cluster composition by Organ
+barplot_organ <- ggplot(percent_comp_organ_ADT, aes(x = Protein_clusters, y = percentage, fill = Organ)) +
+  geom_bar(stat = "identity", position = "fill") +
+  labs(x = "Cluster", y = "Percentage Composition of ADT", fill = "Organ") + ggtitle("Cluster composition by organ") +
+  theme_minimal()
+print(barplot_organ)
+
+# SEPARATE BARPLOT - Cluster composition by Organ
+# To not include cluster 16 - use the below instead of just percent_comp_sample_ADT
+# percent_comp_organ_ADT[(percent_comp_organ_ADT$Protein_clusters %in% 0:15), ]
+ggplot(percent_comp_organ_ADT, aes(x = Protein_clusters, y = percentage, fill = Organ)) + geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Cluster", y = "Percentage Composition of ADT") +
+  scale_fill_discrete(name = "Organ") +
+  theme_minimal()
+
+# STACKED BARPLOT - Cluster composition by Infection
+barplot_infection <- ggplot(percent_comp_infection_ADT, aes(x = Protein_clusters, y = percentage, fill = Infection)) +
+  geom_bar(stat = "identity", position = "fill") +
+  labs(x = "Cluster", y = "Percentage Composition of ADT", fill = "Infection") + ggtitle("Cluster composition by organ") +
+  theme_minimal()
+print(barplot_infection)
+
+# SEPARATE BARPLOT - Cluster composition by Infection
+# To not include cluster 16 - use the below instead of just percent_comp_sample_ADT
+# percent_comp_infection_ADT[(percent_comp_infection_ADT$Protein_clusters %in% 0:15), ]
+ggplot(percent_comp_infection_ADT, aes(x = Protein_clusters, y = percentage, fill = Infection)) + geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Cluster", y = "Percentage Composition of ADT") +
+  scale_fill_discrete(name = "Infection") +
+  theme_minimal()
+```
+
+```{r}
+#hist(librarySizeFactors(seurat_object[["RNA"]]))
+#hist(librarySizeFactors(seurat_object[["ADT"]]))
+```
+
+```{r}
+# Plots using RNA Clusters
+DimPlot(seurat_object, reduction = "umap_rna", group.by = "Organ")
+DimPlot(seurat_object, reduction = "umap_rna", group.by = "Mouse")
+DimPlot(seurat_object, reduction = "umap_rna", group.by = "Infection")
+
+DimPlot(seurat_object, reduction = "umap_adt", group.by = "Organ")
+DimPlot(seurat_object, reduction = "umap_adt", group.by = "Mouse")
+DimPlot(seurat_object, reduction = "umap_adt", group.by = "Infection")
+
+#table(seurat_object[["RNA_clusters"]][[1]][seurat_object[["Infection"]] == "No"])
+#table(seurat_object[["RNA_clusters"]][[1]][seurat_object[["Infection"]] == "Ca"])
+table(seurat_object[["RNA_clusters"]])
+table(seurat_object[["Protein_clusters"]])
+```
+
+```{r}
+#setwd(data_dir)
+#save.image(file='Candida_post_QC.RData')
+saveRDS(seurat_object, file = "dataset_post_QC.rds")
+```

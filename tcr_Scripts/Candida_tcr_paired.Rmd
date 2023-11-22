@@ -1,0 +1,880 @@
+---
+title: "Candida_tr_paired"
+author: "Nathan Morris"
+date: "2023-10-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = getwd())
+```
+
+# Directory Set Up
+
+```{r}
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+```
+
+Here, we use the pre-existing seurat object.
+```{r}
+seurat_object_unfiltered <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT.Rds"))
+
+#seurat_object_WNN <- readRDS("Candida_ds_clean_WNN.rds") # I didn't include WNN analysis in this document
+#seurat_object <- readRDS(file = paste0(data_dir, "dataset_post_sc_Analysis.rds")) #If you want without WNN Clusters and without TCR Information
+
+seurat_object_pseudo <- readRDS(file = paste0(data_dir, "pseudotime_seurat.rds"))
+```
+
+# Load Packages
+
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+library(ggplot2)
+library(Seurat)
+library(tibble)
+library(dplyr)
+library(pheatmap)
+library(tidyr)
+library(usedist)
+library(ggvenn)
+library(stringdist)
+library(patchwork)
+library(djvdj)
+library(data.table)
+```
+
+# I. TCR Analysis using Filtered TCR Excel
+
+Here, I read in the TCR data provided to us by ImmGen. This is a pre-filtered excel file.
+
+```{r}
+IGT27_TCR <- read.table("/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/IGT27_summary_table_with_sample.tsv", header = TRUE, sep = "\t")
+```
+
+# II. IGT27_TCR Dataframe - Looking at all TCR cells (not just cells with RNA/ADT data)
+
+Here, I add the new metadata (mouse and organ columns) to the IGT27_TCR object by mutation of the sample name.
+
+```{r}
+IGT27_TCR <- IGT27_TCR %>% 
+  mutate(
+    Mouse = case_when(
+      Sample == "No_lung_M" ~ "mouse0082",
+      Sample == "No_colon_M" ~ "mouse0082",
+      Sample == "No_mLns_M" ~ "mouse0082",
+      Sample == "Ca_lung_M" ~ "mouse0080",
+      Sample == "Ca_colon_M" ~ "mouse0080",
+      Sample == "Ca_mLns_M" ~ "mouse0080",
+      Sample == "Ca_lung_F" ~ "mouse0081",
+      Sample == "Ca_colon_F" ~ "mouse0081",
+      Sample == "Ca_mLns_F" ~ "mouse0081",
+      Sample == "Spleen_control" ~ "spleen_mouse",
+      TRUE ~ NA_character_
+    )
+  )
+
+IGT27_TCR <- IGT27_TCR %>% 
+  mutate(
+    Organ = case_when(
+      Sample == "No_lung_M" ~ "Lung",
+      Sample == "No_colon_M" ~ "Colon",
+      Sample == "No_mLns_M" ~ "mLns",
+      Sample == "Ca_lung_M" ~ "Lung",
+      Sample == "Ca_colon_M" ~ "Colon",
+      Sample == "Ca_mLns_M" ~ "mLns",
+      Sample == "Ca_lung_F" ~ "Lung",
+      Sample == "Ca_colon_F" ~ "Colon",
+      Sample == "Ca_mLns_F" ~ "mLns",
+      Sample == "Spleen_control" ~ "spleen",
+      TRUE ~ NA_character_
+    )
+  )
+
+IGT27_TCR <- IGT27_TCR %>% 
+  mutate(
+    Infection = case_when(
+      Sample == "No_lung_M" ~ "No",
+      Sample == "No_colon_M" ~ "No",
+      Sample == "No_mLns_M" ~ "No",
+      Sample == "Ca_lung_M" ~ "Yes",
+      Sample == "Ca_colon_M" ~ "Yes",
+      Sample == "Ca_mLns_M" ~ "Yes",
+      Sample == "Ca_lung_F" ~ "Yes",
+      Sample == "Ca_colon_F" ~ "Yes",
+      Sample == "Ca_mLns_F" ~ "Yes",
+      Sample == "Spleen_control" ~ "spleen_mouse",
+      TRUE ~ NA_character_
+    )
+  )
+
+IGT27_TCR <- IGT27_TCR %>%
+  mutate(Mouse_New = ifelse(Mouse == "mouse0080", "Candida Infected Male", ifelse(Mouse == "mouse0081", "Candida Infected Female", ifelse(Mouse == "mouse0082", "No Infection Male", Mouse))))
+
+duplicate_clonotypes <- IGT27_TCR %>%
+  group_by(clonotype, Mouse) %>%
+  dplyr::filter(n_distinct(Barcode) > 1)
+
+IGT27_TCR$duplicate <- IGT27_TCR$Barcode %in% duplicate_clonotypes$Barcode
+
+# Here, I use the clonotype ImmGen T provided as the basis for clonotypes
+paired_clonotypes_Organ <- IGT27_TCR %>%
+  group_by(clonotype, Mouse) %>%
+  dplyr::filter(n_distinct(Organ) > 1)
+
+IGT27_TCR$paired_across_organ <- IGT27_TCR$Barcode %in% paired_clonotypes_Organ$Barcode
+
+# Martini fungi paper states - clonotypes are considered the same if they have the same TCR-B amino acid sequence
+tcr_beta_pairs <- IGT27_TCR %>%
+  group_by(AA.JUNCTION_beta, Mouse) %>%
+  dplyr::filter(n_distinct(Organ) > 1)
+
+IGT27_TCR$tcr_b_paired <- IGT27_TCR$Barcode %in% tcr_beta_pairs$Barcode
+
+# Clonotype Frequency Column
+IGT27_TCR <- IGT27_TCR %>% group_by(Mouse, clonotype) %>% mutate(Clonotype_frequency = n())
+```
+
+We also add the RNA clusters using the metadata in the seurat object that was before our filtering (directly from collaborators).
+
+```{r}
+IGT27_TCR$RNA_clusters <- seurat_object_unfiltered$RNA_clusters[match(IGT27_TCR$Barcode, rownames(seurat_object_unfiltered@meta.data))]
+```
+
+Here we show the distribution of different clusters that have TCR data in the filtered object. There are a lot of cells in cluster 0, 2 and 3 with TCR data, however this is consistent and directly correlated to the total cells in each cluster in the seurat object. 
+
+```{r}
+table(IGT27_TCR$RNA_clusters, useNA = "ifany")
+table(seurat_object_unfiltered$RNA_clusters) # Post filtering seurat object clusters
+```
+
+By looking at the RNA clusters, we can see that there are 353 samples that do not have an RNA cluster. Therefore, these 353 samples only have TCR data, and do not have any RNA/Protein data from the seurat object (hence were not given a RNA cluster). This is important to keep in mind when the NA cluster arises in further analysis.
+
+Simple QC for TCR Proliferation
+```{r}
+paste0("The percent of cells with non-proliferating clonotypes is: ", sum(IGT27_TCR$Clonotype_frequency == 1) / nrow(IGT27_TCR) * 100 )
+paste0("The percent of cells with small-proliferating clonotypes is: ", sum(IGT27_TCR$Clonotype_frequency == 2) / nrow(IGT27_TCR) * 100 )
+paste0("The percent of cells with proliferating clonotypes is: ", sum(IGT27_TCR$Clonotype_frequency > 3) / nrow(IGT27_TCR) * 100 )
+```
+
+Save IGT27_TCR Excel
+
+```
+write.table(IGT27_TCR, file="/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/IGT27_for_analysis.tsv", quote=FALSE, row.names = FALSE, sep='\t')
+```
+
+
+
+# 1. TCR Paired Across Organs
+
+One of the primary objectives for our TCR data analysis is to find migratory clonotypes. Therefore, clonotypes that are primed in the mesenteric lymph node (selection for TCR that is reactive to the Candida albicans), and then are dispersed to the colon and the lung to fight the infection. Using the data provided, we can find clonotypes are found in different cells across different organs by grouping by clonotype and mouse (finding all clonotypes from the same mouse) and seeing which clonotype is found in multiple organs within the same mouse. This tells us which clonotypes are found in multiple, unique organs (ex. not two cells with the same colonotypes both from the colon) for each individual mouse. 
+
+We expect there to be proliferation of few individual clonotypes. As the candida infection spreads from the colon to the lung, the T-cells will be primed in the mesenteric lymph node, where the clonotype that recognizes the antigen, in this case, candida is selected through genetic recombination. Next, these T cells with the TCR attempt to identify the candida cells in the gut and lung. However, the binding between the TCR and the antigen peptides is relatively low affinity, therefore the TCR recognizes the same antigen peptide and many antigen peptides are recognized by the same TCR.
+
+By using the IGT27_TCR data frame directly, I am not eliminating the certain cells that are present here (have a barcode in the TCR data), but they don't have RNA/ADT data (the samples with NA for RNA_cluster are not eliminated).
+
+## 1.A Paired Metadata Creation
+
+Here, I create a new metadata to identify TCR clonotypes that are found in multiple distinct organs for the same mouse (Paired).
+
+First I use the clonotype column, which shows the individual clonotypes from the Alpha and beta chains, to determine the paired_clonotypes_Organ dataframe and paired_across_organ column.
+
+Next, I also just try only using the amino acid sequence of the Beta chain, as the Martini fungal paper suggests to do.
+
+```
+# Here, I use the clonotype ImmGen T provided as the basis for clonotypes
+paired_clonotypes_Organ <- IGT27_TCR %>%
+  group_by(clonotype, Mouse) %>%
+  dplyr::filter(n_distinct(Organ) > 1)
+
+# Martini fungi paper states - clonotypes are considered the same if they have the same TCR-B amino acid sequence
+tcr_beta_pairs <- IGT27_TCR %>%
+  group_by(AA.JUNCTION_beta, Mouse) %>%
+  dplyr::filter(n_distinct(Organ) > 1)
+
+IGT27_TCR$paired_across_organ <- IGT27_TCR$Barcode %in% paired_clonotypes_Organ$Barcode
+
+IGT27_TCR$tcr_b_paired <- IGT27_TCR$Barcode %in% tcr_beta_pairs$Barcode
+```
+
+```{r}
+table(IGT27_TCR$paired_across_organ)
+table(IGT27_TCR$tcr_b_paired)
+```
+
+Here, we can see that the paired using alpha and beta chains has fewer cells than when we calculate the paired just using the beta chain. This is expected.
+
+
+## 1.B Paired Clonotype Cell Count by Mouse/Sample
+
+Now we want to check for proliferation of these migratory clonotypes. Therefore, for each paired clonotype, we want to see how many cells have this clonotype. We also want to check between mice, to see if the infection led to more proliferation of a certain clonotype.
+
+
+### For Clonotype - Alpha and Beta chain
+
+```{r}
+# Now I want to show How many cells these different TCRs are in on average for the paired and not-paired
+mice <- c("mouse0082", "mouse0080", "mouse0081")
+paired_df_list <- list()
+paired_df_plots <- list()
+
+mouse_dict <- c(
+  "mouse0082" = "No Candida Male",
+  "mouse0081" = "Candida Female",
+  "mouse0080" = "Candida Male"
+)
+
+for (mouse in mice){
+  mouse_desc <- mouse_dict[mouse]
+  paired_df_list[[paste0(mouse, "_paired_freq")]] <- as.data.frame(table(subset(IGT27_TCR, Mouse == mouse & paired_across_organ == "TRUE")$clonotype))
+  
+  p1 <- ggplot(paired_df_list[[paste0(mouse, "_paired_freq")]], aes(x = Freq)) +
+  geom_histogram(fill = "steelblue", color = "white", bins = 10) +
+  labs(x = "Number of Cells with the same Clonotype", y = "Clonotype Count") +
+  ggtitle(paste0(mouse_desc, " Paired TCR Frequencies")) +
+  theme_minimal()
+  
+  paired_df_list[[paste0(mouse, "_not_paired_freq")]] <- as.data.frame(table(subset(IGT27_TCR, Mouse == mouse & paired_across_organ == "FALSE")$clonotype))
+  
+  p2 <- ggplot(paired_df_list[[paste0(mouse, "_not_paired_freq")]], aes(x = Freq)) +
+  geom_histogram(fill = "steelblue", color = "white", bins = 10) +
+  labs(x = "Number of Cells with the same Clonotype", y = "Clonotype Count") +
+  ggtitle(paste0(mouse_desc, " Not Paired TCR Frequencies")) +
+  theme_minimal()
+  
+  paired_df_plots[[mouse]] <- p1 + p2 
+}
+```
+
+Here, I show how many clonotypes are shared between a certain number of cells.
+
+```{r}
+paired_df_plots[["mouse0082"]]
+paired_df_plots[["mouse0081"]]
+paired_df_plots[["mouse0080"]]
+```
+
+Above, we see that there are at maximum 5 cells with the same migratory clonotype. This happens four times in total with two clonotypes in the Non infected male and two clonotypes in the Candida infected female having five cells each with the same migratory clonotype.
+
+On the right of each, we can see that a majority (~2000) of the clonotypes are unique, and therefore have one cell with that certain clonotype in the non-duplicated portion.
+
+Unfortunately, in the Candida infected male we see very little proliferation in the paired clonotypes (across organ). There are only a maximum of two cells with the same clonotype, this happens once.
+
+### For Beta chain only
+
+```
+# Now I want to show How many cells these different TCRs are in on average for the paired and not-paired
+mice <- c("mouse0082", "mouse0080", "mouse0081")
+paired_df_beta_list <- list()
+paired_df_beta_plots <- list()
+
+for (mouse in mice){
+  mouse_desc <- mouse_dict[mouse]
+  
+  paired_df_beta_list[[paste0(mouse, "_paired_freq")]] <- as.data.frame(table(subset(IGT27_TCR, Mouse == mouse & tcr_b_paired == "TRUE")$clonotype))
+  
+  p1 <- ggplot(paired_df_beta_list[[paste0(mouse, "_paired_freq")]], aes(x = Freq)) +
+  geom_histogram(fill = "steelblue", color = "white", bins = 10) +
+  labs(x = "Number of Cells with the same Clonotype", y = "Clonotype Count") +
+  ggtitle(paste0(mouse_desc, " Beta Paired TCR Frequencies")) +
+  theme_minimal()
+  
+  paired_df_beta_list[[paste0(mouse, "_not_paired_freq")]] <- as.data.frame(table(subset(IGT27_TCR, Mouse == mouse & tcr_b_paired == "FALSE")$clonotype))
+  
+  p2 <- ggplot(paired_df_beta_list[[paste0(mouse, "_not_paired_freq")]], aes(x = Freq)) +
+  geom_histogram(fill = "steelblue", color = "white", bins = 10) +
+  labs(x = "Number of Cells with the same Clonotype", y = "Clonotype Count") +
+  ggtitle(paste0(mouse_desc, " Not Beta Paired TCR Frequencies")) +
+  theme_minimal()
+  
+  paired_df_beta_plots[[mouse]] <- p1 + p2 
+}
+```
+Here, I show how many clonotypes are shared between a certain number of cells.
+
+```
+paired_df_beta_plots[["mouse0082"]]
+paired_df_beta_plots[["mouse0081"]]
+paired_df_beta_plots[["mouse0080"]]
+```
+
+When using the beta chains only for calculation, we can see that the proliferation is very similar to that of the clonotype. We only see a maximum amount of 5 cells with the same clonotype, which is found in both the Candida infected female and not infected Male, however the Candida infected Male doesn't show any proliferation of cells with these migratory clonotypes.
+
+## 1.C Paired Clonotype Cell Count Total (All Mice)
+
+Here, we do not separate by each mouse, therefore all mice and infection/non-infection are both shown.
+
+### For Clonotype
+
+```{r}
+TCR_TRUE <- as.data.frame(table(subset(IGT27_TCR, paired_across_organ == "TRUE")$clonotype))
+TCR_FALSE <- as.data.frame(table(subset(IGT27_TCR, paired_across_organ == "FALSE")$clonotype))
+
+p7 <- ggplot(TCR_TRUE, aes(x = Freq)) +
+  geom_histogram(fill = "steelblue", color = "white", bins = 10) +
+  labs(x = "Number of Cells with the same Clonotype", y = "Clonotype Count") +
+  ggtitle("All Mice Paired TCR Frequencies") +
+  theme_minimal()
+
+p8 <- ggplot(TCR_FALSE, aes(x = Freq)) +
+  geom_histogram(fill = "steelblue", color = "white", bins = 10) +
+  labs(x = "Number of Cells with the same Clonotype", y = "Clonotype Count") +
+  ggtitle("All Mice Not-Paired TCR Frequencies") +
+  theme_minimal()
+
+p7 + p8
+```
+
+Here, again the 4 clonotypes with 5 cells each arise.
+
+### For Beta Chain
+
+```
+TCR_TRUE <- as.data.frame(table(subset(IGT27_TCR, tcr_b_paired == "TRUE")$clonotype))
+TCR_FALSE <- as.data.frame(table(subset(IGT27_TCR, tcr_b_paired == "FALSE")$clonotype))
+
+p7 <- ggplot(TCR_TRUE, aes(x = Freq)) +
+  geom_histogram(fill = "steelblue", color = "white", bins = 10) +
+  labs(x = "Number of Cells with the same Clonotype", y = "Clonotype Count") +
+  ggtitle("All Mice Paired TCR Frequencies") +
+  theme_minimal()
+
+p8 <- ggplot(TCR_FALSE, aes(x = Freq)) +
+  geom_histogram(fill = "steelblue", color = "white", bins = 10) +
+  labs(x = "Number of Cells with the same Clonotype", y = "Clonotype Count") +
+  ggtitle("All Mice Not-Paired TCR Frequencies") +
+  theme_minimal()
+
+p7 + p8
+```
+
+The beta chain shows similar proliferation (which is consistent with the observation above).
+
+## 1.D Paired Organ Distribution of the Maximum Proliferated Paired Clonotype (5 cells)
+
+Since we saw similar proliferation in clonotypes (alpha and beta chain) and just the beta chain in all mice, we focus our results on just the total clonotypes for the remainder of the analysis.
+
+```{r}
+max_clonotypes <- TCR_TRUE$Var1[TCR_TRUE$Freq == max(TCR_TRUE$Freq)]
+#max_clonotypes <- TCR_TRUE$Var1
+
+organ_split_max_clonotype <- matrix(NA, nrow = length(max_clonotypes), ncol = length(unique(IGT27_TCR$Organ)))
+colnames(organ_split_max_clonotype) <- c(unique(IGT27_TCR$Organ)[1:3], "Mouse", "Infection")
+rownames(organ_split_max_clonotype) <- max_clonotypes
+
+
+for (i in seq(1:length(max_clonotypes))){
+   temp_df <- table(IGT27_TCR$Organ[IGT27_TCR$clonotype == max_clonotypes[i]]) 
+   organ_split_max_clonotype[i, "Colon"] <- temp_df["Colon"]
+   organ_split_max_clonotype[i, "mLns"] <- temp_df["mLns"]
+   organ_split_max_clonotype[i, "Lung"] <- temp_df["Lung"]
+   organ_split_max_clonotype[i, "Mouse"] <- IGT27_TCR[IGT27_TCR$clonotype == max_clonotypes[i],]$Mouse[1]
+   organ_split_max_clonotype[i, "Infection"] <- IGT27_TCR[IGT27_TCR$clonotype == max_clonotypes[i],]$Infection[1]
+}
+```
+
+```{r}
+organ_split_max_clonotype
+```
+
+Here, we can see that in all of the four clonotypes that are within the maximum cells (max 5 cells share the same clonotype), they all have 1 cell in the colon and then 4 in the lung or 4 in the mLns.
+
+This would indicate that possibly the cells that are primed in the colon are being sent to the lung to deal with the infection there. However, we would still suspect many cells in the colon to be reacting to the Candida. Unfortunately, since we only have 5 cells with these clonotypes, it is hard to draw conclusions on their proliferation.
+
+## 1.E Comparing Infected vs Non-infected Paired TCR Clonotypes
+
+Here, we check for shared paired clonotypes between the non-infected and the infected mice.
+
+```{r}
+Candida_Paired_Clonotypes <- c(paired_df_list$mouse0081_paired_freq$Var1, paired_df_list$mouse0080_paired_freq$Var1)
+No_Candida_Paired_Clonotypes <- paired_df_list$mouse0082_paired_freq$Var1
+
+sum(Candida_Paired_Clonotypes %in% No_Candida_Paired_Clonotypes)
+sum(No_Candida_Paired_Clonotypes %in% Candida_Paired_Clonotypes)
+```
+
+There are no migratory / paired clonotypes that are shared between the Infected and the Non-infected samples. Since the clonotypes in the non-infected Mouse are possibly reacting to a different pathogen, we can expect there to be unique clonotypes between the mice. However, if this study were temporal, we could perhaps see that before the infection arises there is a singular clonotype that is common between the non-infected mouse and the infected mouse, and there would be proliferation in the infected mouse.
+
+## 1.F Paired Clonotypes by Shared Organ Heatmap/Venn Diagram
+
+### Dataframe
+
+This can be used if we want to find the ratios. Therefore, how many clonotypes are shared between Lung/Colon, Lung/mLns, and Colon/mLns for both the Infected and Non-infected mice.
+
+Below is a function to create a dataframe to specify TCR_paired samples with an infection status, and within a certain cluster if identified.
+
+```{r}
+calculateInfectedClonotypes <- function(infection_status, cluster = NULL, in_cluster = TRUE) {
+  # Create an empty matrix for the infected clonotypes
+  df_infected <- matrix(NA, nrow = 3, ncol = 3)
+  colnames(df_infected) <- c("Colon", "Lung", "mLns")
+  rownames(df_infected) <- c("Colon", "Lung", "mLns")
+  
+  # Filter by infection status
+  tcr_paired <- IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE,]
+  
+  if (!is.null(cluster)) {
+    if (in_cluster == TRUE) {
+      tcr_cluster <- tcr_paired[tcr_paired$RNA_clusters == cluster,]
+    } else {
+      tcr_cluster <- tcr_paired[tcr_paired$RNA_clusters != cluster,]
+    }
+  }
+  
+  if (infection_status == "Yes") {
+    if (!is.null(cluster)) {
+      tcr_paired_inf <- tcr_cluster[tcr_cluster$Infection == "Yes",]
+    } else {
+      tcr_paired_inf <- tcr_paired[tcr_paired$Infection == "Yes",]
+    }
+  } else if (infection_status == "No") {
+    if (!is.null(cluster)) {
+      tcr_paired_inf <- tcr_cluster[tcr_cluster$Infection == "No",]
+    } else {
+      tcr_paired_inf <- tcr_paired[tcr_paired$Infection == "No",]
+    }
+  } else {
+    stop("Invalid infection status. Use 'Yes' or 'No'.")
+  }
+  
+  # Calculate intersections and fill the matrix
+  df_infected["Colon", "Lung"] <- length(na.omit(intersect(tcr_paired_inf[tcr_paired_inf$Organ == "Lung",]$clonotype, tcr_paired_inf[tcr_paired_inf$Organ == "Colon",]$clonotype)))
+  df_infected["Lung", "Colon"] <- df_infected["Colon", "Lung"]
+  
+  df_infected["mLns", "Lung"] <- length(na.omit(intersect(tcr_paired_inf[tcr_paired_inf$Organ == "mLns",]$clonotype, tcr_paired_inf[tcr_paired_inf$Organ == "Lung",]$clonotype)))
+  df_infected["Lung", "mLns"] <- df_infected["mLns", "Lung"]
+  
+  df_infected["Colon", "mLns"] <- length(na.omit(intersect(tcr_paired_inf[tcr_paired_inf$Organ == "Colon",]$clonotype, tcr_paired_inf[tcr_paired_inf$Organ == "mLns",]$clonotype)))
+  df_infected["mLns", "Colon"] <- df_infected["Colon", "mLns"]
+  
+  df_infected[is.na(df_infected)] <- 0
+  
+  return(df_infected)
+}
+
+# Usage examples:
+# 1. Infection "Yes", Cluster 5, in_cluster = TRUE
+#infected_in_cluster_df <- calculateInfectedClonotypes(infection_status = "Yes", cluster = 5, in_cluster = TRUE)
+
+# 2. Infection "No", Cluster 5, in_cluster = FALSE
+#infected_out_cluster_df <- calculateInfectedClonotypes(infection_status = "No", cluster = 5, in_cluster = FALSE)
+
+# Usage example:
+#infected_df <- calculateInfectedClonotypes(infection_status = "Yes")  # Replace "Yes" and 5 as needed
+#infected_df <- calculateInfectedClonotypes(infection_status = "No", cluster = 5)  # Replace "Yes" and 5 as needed
+```
+
+```{r}
+# Paired Clonotypes by Organ Heatmap
+
+# Infected Organ Dataframe
+infected_df <- calculateInfectedClonotypes("Yes")
+
+# Non-Infected Organ Dataframe
+noninfected_df <- calculateInfectedClonotypes("No")
+```
+
+```{r}
+pheatmap(infected_df, display_numbers = infected_df, main = "Infected Paired across Organ Clonotypes by Organ")
+pheatmap(noninfected_df, display_numbers = noninfected_df, main = "Non-infected Paired across Organ Clonotypes by Organ")
+```
+
+Above, we have a heat map depicting how many clonotypes are common between organs. A majority of the clonotypes that are paired across organ are between the Colon and the Lung for both the Non-Infected and the Infected.
+
+However, due to the low frequency of these migratory clonotypes, it is difficult to calculate statistics, especially when we consider that the infected dataframe contains two individual infected mice. This result again points to the fact that localized Candida infection in the colon/gut does not lead to a larger amount of migratory clonotypes when compared to a non-infected mouse.
+
+### Venn Diagram
+
+Venn Diagram Version for each Mouse
+
+```{r}
+mice <- c("mouse0082", "mouse0080", "mouse0081")
+all_mice_clonos <- list()
+tcr_plots_organs <- list()
+
+for (mouse in mice){
+  tcr_mouse <- IGT27_TCR[IGT27_TCR$Mouse == mouse,]
+  mouse_new <- na.omit(unique(tcr_mouse$Mouse_New))
+  all_mice_clonos[[mouse_new]] <- na.omit(tcr_mouse$clonotype)
+  tmp_list <- list(
+    Lung_m0 <- na.omit(tcr_mouse[tcr_mouse$Organ == "Lung",]$clonotype),
+    Colon_m0 <- na.omit(tcr_mouse[tcr_mouse$Organ == "Colon",]$clonotype),
+    mlns_m0 <- na.omit(tcr_mouse[tcr_mouse$Organ == "mLns",]$clonotype) )
+  names(tmp_list) <-  c("Lung", "Colon", "mLns")
+  assign(paste0("x_", mouse), tmp_list)
+  
+  p1 <- ggvenn(tmp_list, 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF"),
+  stroke_size = 0.5, set_name_size = 3) +   
+  ggtitle(mouse_dict[mouse])
+  
+  tcr_plots_organs[[mouse]] <- p1
+  
+}
+```
+
+Graph
+```{r}
+all_plots <- tcr_plots_organs[["mouse0082"]] + tcr_plots_organs[["mouse0081"]] + tcr_plots_organs[["mouse0080"]]
+plot <- all_plots + plot_annotation(title = "Shared Clonotypes between Organs for each Mouse")
+plot
+
+#Reduce(intersect,  x_m0)
+#intersect(x_m0$mLns, x_m0$Colon)
+```
+
+We can easily compare the number of migratory clonotypes between mice using venn-diagrams. Unfortunately, this leads us to the same result. The Candida infected male has very low amount of migratory clonotypes. While the infected female and non-infected male show similar number of migratory clonotypes. With this information, we can keep in mind that the maximum number of cells with any of these migratory clonotypes is 5, with both the infected and non-infected mice from the previous figure. 
+
+Although not significant and most likely due to random chance, there is a single clonotype that is found in all organs for the infected female. This is further investigated below.
+
+### 1.F-2 Migratory Clonotypes per Mouse - Number of Cells
+
+Infected Male
+```{r}
+migratory_clonos_freq_list <- list()
+
+Infected_male_migratory_clonos <- intersect(x_mouse0080$Lung, x_mouse0080$Colon)
+
+mouse_shared_clonos <- as.data.frame(table(IGT27_TCR[IGT27_TCR$clonotype %in% Infected_male_migratory_clonos,]$clonotype, IGT27_TCR[IGT27_TCR$clonotype %in% Infected_male_migratory_clonos,]$Organ))
+mouse_shared_clonos$clono_head <- (substr(mouse_shared_clonos$Var1, 1, 16))
+
+ggplot(mouse_shared_clonos,  aes(x=clono_head, y=Freq, fill = Var2)) +
+    geom_bar(stat="identity") +
+    labs(x = "Clonotype", y = "Number of Cells", fill = "Organ") + 
+  theme(axis.text.x = element_text(angle = 45)) + 
+  ggtitle("Number of Cells in Cells in Migratory Clonotypes - Infected Male")
+```
+
+Infected Female
+```{r}
+Infected_female_migratory_clonos <- intersect(x_mouse0081$Lung, x_mouse0081$Colon)
+# This includes - Reduce(intersect,  x_mouse0081)
+
+mouse_shared_clonos <- as.data.frame(table(IGT27_TCR[IGT27_TCR$clonotype %in% Infected_female_migratory_clonos,]$clonotype, IGT27_TCR[IGT27_TCR$clonotype %in% Infected_female_migratory_clonos,]$Organ))
+mouse_shared_clonos$clono_head <- (substr(mouse_shared_clonos$Var1, 1, 16))
+
+ggplot(mouse_shared_clonos,  aes(x=clono_head, y=Freq, fill = Var2)) +
+    geom_bar(stat="identity") +
+    labs(x = "Clonotype", y = "Number of Cells", fill = "Organ") + 
+  theme(axis.text.x = element_text(angle = 45)) + 
+  ggtitle("Number of Cells in Cells in Migratory Clonotypes - Infected Female")
+```
+
+```{r}
+Noninfected_male_migratory_clonos <- append(intersect(x_mouse0082$Lung, x_mouse0082$Colon), intersect(x_mouse0082$Lung, x_mouse0082$mLns))
+Noninfected_male_migratory_clonos <- append(Noninfected_male_migratory_clonos, intersect(x_mouse0082$Colon, x_mouse0082$mLns))
+
+mouse_shared_clonos <- as.data.frame(table(IGT27_TCR[IGT27_TCR$clonotype %in% Noninfected_male_migratory_clonos,]$clonotype, IGT27_TCR[IGT27_TCR$clonotype %in% Noninfected_male_migratory_clonos,]$Organ))
+mouse_shared_clonos$clono_head <- (substr(mouse_shared_clonos$Var1, 1, 16))
+
+ggplot(mouse_shared_clonos,  aes(x=clono_head, y=Freq, fill = Var2)) +
+    geom_bar(stat="identity") +
+    labs(x = "Clonotype", y = "Number of Cells", fill = "Organ") + 
+  theme(axis.text.x = element_text(angle = 45)) + 
+  ggtitle("Number of Cells in Cells in Migratory Clonotypes - Non-infected Male")
+```
+
+```{r}
+all_3_clonotype <- Reduce(intersect, x_mouse0081)
+
+all_3_clonotype
+length(IGT27_TCR[IGT27_TCR$clonotype == all_3_clonotype,]$Barcode)
+IGT27_TCR[IGT27_TCR$clonotype == all_3_clonotype,]$Organ
+```
+
+Three cells have this clonotype. Therefore, there is only one cell from each organ (mLns, Lung and Colon) with this same clonotype. This doesn't indicate that there was very much proliferation of this clonotype.
+
+### 1.F-3 All Mice Clonotype similarity
+
+```{r}
+ggvenn(
+  all_mice_clonos, 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF"),
+  stroke_size = 0.5, set_name_size = 3
+  ) +   ggtitle("Shared Clonotypes between Mice")
+```
+
+The below calculation shows that some different mice have actually come up with the same TCR sequence. There is a larger number of clonotypes shared between the infected mice, versus either with the non-infected mouse. However, none of these clonotypes that are the same between infected mice are paired (or migratory) clonotypes within the same mouse.
+
+```{r}
+candida_clonos <- intersect(all_mice_clonos[["Candida Infected Male"]], all_mice_clonos[["Candida Infected Female"]])
+
+candida_clonos %in% paired_clonotypes_Organ$Barcode
+
+mice_shared_clonos <- as.data.frame(table(IGT27_TCR[IGT27_TCR$clonotype %in% candida_clonos,]$clonotype, IGT27_TCR[IGT27_TCR$clonotype %in% candida_clonos,]$Organ, IGT27_TCR[IGT27_TCR$clonotype %in% candida_clonos,]$Mouse_New))
+mice_shared_clonos$clono_head <- (substr(mice_shared_clonos$Var1, 1, 16))
+mice_shared_clonos$Mouse <- mice_shared_clonos$Var3
+
+ggplot(mice_shared_clonos,  aes(x=clono_head, y=Freq, fill = Var2, colour = Mouse)) +
+    geom_bar(stat="identity") +
+    labs(x = "Clonotype", y = "Number of Cells", fill = "Organ") + 
+  theme(axis.text.x = element_text(angle = 45)) + 
+  ggtitle("Number of Cells in Clonotypes Shared between Infected Mice")
+```
+
+### 1.F-4 Paired Clonotypes by Shared Organ Heatmap/Venn Diagram - Only Cluster 5
+
+In our previous analysis, we found that cluster 5 was differentially abundant in the infected mice when compared to the non-infected mice. After doing differential gene expression with this cluster, we concluded that this cluster is most likely comprised of Th-17 cells. 
+
+Th-17 cells are T-helper cells that are known to be critically important for immune protection against Candida albincans at the ajority of mucosal sits in the body. They are now regarded the predominant cell type that confer protection against Candida albicans at oral and dermal locations. They secrete numerous cytokines, such as IL-17A, IL-17F, and IL-22. They play a key role in recruiting and activating neutrophils. 
+
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9513067/
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6419754/
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4601188/ *
+
+Here, we hone in on this Th-17 cells and examine whether or not proliferation and migratory clonotypes are primarily in the Th-17 cell type.
+
+```{r}
+# Paired Clonotypes by Organ Heatmap
+
+# Infected Organ Dataframe - Cluster 5
+df_infected_cluster5 <- calculateInfectedClonotypes(infection_status = "Yes", cluster = 5, in_cluster = TRUE)
+
+# Non-Infected Organ Dataframe - Cluster 5
+
+df_noninfected_cluster5 <- calculateInfectedClonotypes(infection_status = "No", cluster = 5, in_cluster = TRUE)
+```
+
+```{r}
+pheatmap(df_infected_cluster5, display_numbers = df_infected_cluster5, main = "Infected Paired across Organ Clonotypes by Organ Cluster 5")
+pheatmap(df_noninfected_cluster5, display_numbers = df_noninfected_cluster5, main = "Non-infected Paired across Organ Clonotypes by Organ Cluster 5")
+```
+
+As you can see from the above, the cells with migratory TCR clonotypes are indeed primarily in the Th-17 cell type.
+
+However, it is interesting to see that the non-infected mouse also has a majority of the migratory cell types in the Th-17 cells.
+
+Venn Diagram for Cluster 5
+
+```{r}
+mice <- c("mouse0082", "mouse0080", "mouse0081")
+tcr_plots_organs_clust5 <- list()
+
+for (mouse in mice){
+  tcr_mouse <- IGT27_TCR[IGT27_TCR$Mouse == mouse & IGT27_TCR$RNA_clusters == 5,]
+  tmp_list <- list(
+    Lung_m0 <- na.omit(tcr_mouse[tcr_mouse$Organ == "Lung",]$clonotype),
+    Colon_m0 <- na.omit(tcr_mouse[tcr_mouse$Organ == "Colon",]$clonotype),
+    mlns_m0 <- na.omit(tcr_mouse[tcr_mouse$Organ == "mLns",]$clonotype) )
+  names(tmp_list) <-  c("Lung", "Colon", "mLns")
+  assign(paste0("x_", mouse), tmp_list)
+  
+  p1 <- ggvenn(tmp_list, 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF"),
+  stroke_size = 0.5, set_name_size = 3) +   
+  ggtitle(mouse_dict[mouse])
+  
+  tcr_plots_organs_clust5[[mouse]] <- p1
+}
+```
+
+Graphs
+```{r}
+#all_plots_5 <- p0_5 + p1_5 + p2_5
+all_plots_5 <- tcr_plots_organs_clust5$mouse0080 + tcr_plots_organs_clust5$mouse0081 + tcr_plots_organs_clust5$mouse0082
+plot_5 <- all_plots_5 + plot_annotation(title = "Shared Clonotypes between Organs for each Mouse for Cluster 5")
+plot_5
+
+#Reduce(intersect,  x_m0)
+#intersect(x_m0$mLns, x_m0$Colon)
+```
+
+When subsetting by cluster, there is a chance that there will be clonotypes in only one organ, even though we subset by all paired_across_organ clonotypes. This is due to there being clonotypes across multiple clusters.
+
+For example, the 1 in the Colon circle on the Non-infected side represents - "TRAV7D-5.TRAJ9.CAVSSSSNMGYKLTF.TRBV16.TRBJ1-1.CASSLGRDTEVFF"
+The 1 is because cells in the Colon with this clonotype are in cluster 5, however the cells with this clonotype in the mlns are in cluster 8. Therefore, they are not included in the both Colon and Mlns section, and is just in the Colon subsection.
+
+Also, our one Candida-female clonotype that was shared across all organs, TRAV12-2.TRAJ40.CALSDRGTGNYKYVF.TRBV16.TRBJ2-5.CASSLADTQYF, is now not shown. This is because the cell from the mlns is in Cluster 1.
+
+However, this graph also shows that most of the migratory clonotypes in both the infected and non-infected mice are within the cluster 5, or Th-17 cell type.
+
+### 1.F-5 Paired Clonotypes by Shared Organ Heatmap/Venn Diagram - NOT Cluster 5
+
+```{r}
+# Paired Clonotypes by Organ Heatmap
+
+# Infected Organ Dataframe
+df_infected_not_cluster5 <- calculateInfectedClonotypes(infection_status = "Yes", cluster = 5, in_cluster = FALSE)
+
+# Non-Infected Organ Dataframe
+
+df_noninfected_not_cluster5 <- calculateInfectedClonotypes(infection_status = "No", cluster = 5, in_cluster = FALSE)
+```
+
+```{r}
+pheatmap(df_infected_not_cluster5, display_numbers = df_infected_cluster5, main = "Infected Paired across Organ Clonotypes by Organ  NOT Cluster 5")
+pheatmap(df_noninfected_not_cluster5, display_numbers = df_noninfected_cluster5, main = "Non-infected Paired across Organ Clonotypes by Organ NOT Cluster 5")
+```
+
+Venn Diagram for Clusters beside 5
+
+```{r}
+mice <- c("mouse0082", "mouse0080", "mouse0081")
+
+tcr_plots_organs_no_clust5 <- list()
+
+for (mouse in mice){
+  tcr_mouse <- IGT27_TCR[IGT27_TCR$Mouse == mouse & IGT27_TCR$RNA_clusters != 5,]
+  tmp_list <- list(
+    Lung_m0 <- na.omit(tcr_mouse[tcr_mouse$Organ == "Lung",]$clonotype),
+    Colon_m0 <- na.omit(tcr_mouse[tcr_mouse$Organ == "Colon",]$clonotype),
+    mlns_m0 <- na.omit(tcr_mouse[tcr_mouse$Organ == "mLns",]$clonotype) )
+  names(tmp_list) <-  c("Lung", "Colon", "mLns")
+  assign(paste0("x_", mouse), tmp_list)
+  
+  p1 <- ggvenn(tmp_list, 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF"),
+  stroke_size = 0.5, set_name_size = 3) +   
+  ggtitle(mouse_dict[mouse])
+  
+  tcr_plots_organs_no_clust5[[mouse]] <- p1
+}
+```
+
+Graphs
+```{r}
+#all_plots_no5 <- p0_no5 + p1_no5 + p2_no5
+all_plots_no5 <- tcr_plots_organs_no_clust5$mouse0080 + tcr_plots_organs_no_clust5$mouse0081 + tcr_plots_organs_no_clust5$mouse0082
+plot_no5 <- all_plots_no5 + plot_annotation(title = "Shared Clonotypes between Organs for each Mouse for NOT Cluster 5")
+plot_no5
+
+#Reduce(intersect,  x_m0)
+#intersect(x_m0$mLns, x_m0$Colon)
+```
+
+This further proves our point, as there are very few cells with the migratory TCRs outside of the Th-17 cell type.
+
+## 1.G Paired Across Organ Statistics for Comparison
+
+Creating a dataframe to compare Paired Clonotypes across Organs vs Duplicate Clonotypes (possibly in the same organ)
+
+```{r}
+compare_df <- as.data.frame(matrix(nrow = 8, ncol = 3))
+colnames(compare_df) <- c("Paired Across Organ", "Duplicates No Organ Specification", "Total #")
+rownames(compare_df) <- c("# Cells", "% Cells", "Infected Cells #", "Non-Infected Cells #", "Infected Cells %", "# Clonotypes", "% Clonotypes", "% Paired Across Organ")
+```
+
+Filling out the above table for Paired Across Organ
+
+```{r}
+compare_df["# Cells", "Paired Across Organ"] <- sum(IGT27_TCR$paired_across_organ == TRUE)
+compare_df["# Cells", "Total #"] <- nrow(IGT27_TCR)
+
+compare_df["% Cells", "Paired Across Organ"] <- sum(IGT27_TCR$paired_across_organ == TRUE) / nrow(IGT27_TCR) * 100
+compare_df["% Cells", "Total #"] <- nrow(IGT27_TCR) / nrow(IGT27_TCR) * 100
+
+compare_df["Infected Cells #", "Paired Across Organ"] <- nrow(IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE & IGT27_TCR$Infection == "Yes",])
+compare_df["Infected Cells #", "Total #"] <- nrow(IGT27_TCR[IGT27_TCR$Infection == "Yes",])
+
+compare_df["Non-Infected Cells #", "Paired Across Organ"] <- nrow(IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE & IGT27_TCR$Infection == "No",])
+compare_df["Non-Infected Cells #", "Total #"] <- nrow(IGT27_TCR[IGT27_TCR$Infection == "No",])
+
+compare_df["Infected Cells %", "Paired Across Organ"] <- nrow(IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE & IGT27_TCR$Infection == "Yes",]) / nrow(IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE,]) * 100
+compare_df["Infected Cells %", "Total #"] <- nrow(IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE,]) / nrow(IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE,]) * 100
+
+compare_df["# Clonotypes", "Paired Across Organ"] <- length(unique(IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE,]$clonotype))
+compare_df["# Clonotypes", "Total #"] <- length(unique(IGT27_TCR$clonotype))
+
+compare_df["% Clonotypes", "Paired Across Organ"] <- length(unique(IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE,]$clonotype)) / length(unique(IGT27_TCR$clonotype)) * 100
+compare_df["% Clonotypes", "Total #"] <- length(unique(IGT27_TCR$clonotype)) / length(unique(IGT27_TCR$clonotype)) * 100
+```
+
+As we can see, there are 67 cells that are paired across organs and 24 clonotypes that are paired across organs. The number of infected and non-infected is similar. 
+
+## 1.H-1 RNA Cluster, Organ and Mouse Distribution for Paired Clonotypes
+
+We will use this to compare the paired clonotypes to the duplicated clonotypes in section 3.
+
+```{r}
+dataframes_paired <- list()
+parameters <- c("RNA_clusters", "Organ", "Mouse")
+for (parameter in parameters){
+  tmp_df_inf <- as.data.frame(table(IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE & IGT27_TCR$Infection == "Yes" ,][,parameter]))
+  tmp_df_noinf <- as.data.frame(table(IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE & IGT27_TCR$Infection == "No" ,][,parameter]))
+  merged_df <- merge(tmp_df_inf, tmp_df_noinf, by = "Var1", suffixes = c("_Infection", "_NoInfection"))
+  colnames(merged_df) <- c(parameter, "Freq_Infection", "Freq_NoInfection")
+  #merged_df$Freq_Total <- rowSums(merged_df[, c("Freq_Infection", "Freq_NoInfection")])
+  dataframes_paired[[parameter]] <- merged_df
+}
+```
+
+```{r}
+df_long <- pivot_longer(dataframes_paired$RNA_clusters, cols = starts_with("Freq"), names_to = "Infection_Status", values_to = "Frequency")
+
+ggplot(df_long, aes(x=reorder(RNA_clusters, -table(RNA_clusters)[RNA_clusters]), fill=Infection_Status, y = Frequency)) + 
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = "RNA Cluster", y = "Number of Cells") +
+  ggtitle("Number of Cells with Paired Clonotypes across Organs in RNA Clusters") +
+  theme_minimal()
+```
+
+
+In conclusion, the cells with paired clonotypes (clonotypes found in multiple organs) are pretty evenly spread between the infected and non-infected mice, which is not something we expected.  However, for both the infected and non-infected mice, we find that most of the paired clonotypes are found in cluster 5. Cluster 5 was previously found to be the Th-17 like cell. I don't think we have an explanation for why the non-infected mouse is having many Th-17 like cells migratory clonotypes.
+
+## 1.H-2 By Mouse, see whether the clonotypes that are shared are only within Cluster 5, or are they shared between others
+
+```{r}
+dataframes_paired_mouse_list <- list()
+
+parameters <- c("WNN_clusters", "RNA_clusters", "Organ", "Mouse")
+mice <- c("mouse0082", "mouse0080", "mouse0081")
+
+dataframes_list <- list()
+
+for (mouse in mice){
+  tmp_df2 <- as.data.frame(IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE & IGT27_TCR$Mouse == mouse,])
+  new_list <- list()
+  for (row in seq(1:nrow(tmp_df2))){
+    clonotype <- tmp_df2[row, ]$clonotype
+    #print(clonotype)
+    #print(paste(tmp_df2[tmp_df2$clonotype == clonotype, ]$RNA_clusters, collapse = ", "))
+    clusters_per_clonotype <- length(unique(tmp_df2[tmp_df2$clonotype == clonotype, ]$RNA_clusters))
+    n_organs_per_clonotype <- length(unique(tmp_df2[tmp_df2$clonotype == clonotype, ]$Organ))
+    tmp_df2[row, "clusters_per_clonotype"] <- paste(tmp_df2[tmp_df2$clonotype == clonotype, ]$RNA_clusters, collapse = ", ")
+    tmp_df2[row, "n_clusters_per_clonotype"] <- clusters_per_clonotype
+    tmp_df2[row, "n_organs_per_clonotype"] <- n_organs_per_clonotype
+    #print(as.numeric(clusters_per_clonotype))
+    #IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE & IGT27_TCR$Mouse == "mouse0082" & IGT27_TCR$clonotype =="TRAV13N-1.TRAJ6.CAMREMGGNYKPTF.TRBV15.TRBJ1-1.CASSLGGSTEVFF",]
+    #name(new_list[row]) <- tmp_clonotype
+  }
+  tmp_df2$n_clusters_per_clonotype <- as.factor(tmp_df2$n_clusters_per_clonotype)
+  tmp_df2$n_organs_per_clonotype <- as.factor(tmp_df2$n_organs_per_clonotype)
+  dataframes_list[[mouse]] <- tmp_df2
+}
+```
+
+```{r}
+df <- dataframes_list$mouse0082
+df <- rbind(df, dataframes_list$mouse0080)
+df <- rbind(df, dataframes_list$mouse0081)
+
+df <- df %>%
+  mutate(Mouse_New = ifelse(Mouse == "mouse0080", "Candida Infected Male", ifelse(Mouse == "mouse0081", "Candida Infected Female", ifelse(Mouse == "mouse0082", "No Infection Male", Mouse))))
+
+ggplot(df, aes(x = RNA_clusters, fill= n_clusters_per_clonotype)) + 
+  geom_bar(aes(fill = n_clusters_per_clonotype), colour = "grey") +
+  theme_minimal() +
+  labs(x = "RNA Clusters", y = "Number of Cells") +
+  facet_grid(. ~ Infection, scales = "free_x", space = "free_x")  # Remove the fill legend
+
+ggplot(df, aes(x = RNA_clusters, fill= n_clusters_per_clonotype)) + 
+  geom_bar(aes(fill = n_clusters_per_clonotype), colour = "grey") +
+  theme_minimal() +
+  labs(x = "RNA Clusters", y = "Number of Cells") +
+  facet_grid(. ~ Mouse_New, scales = "free_x", space = "free_x")  # Remove the fill legend
+
+ggplot(df, aes(x = RNA_clusters, fill= n_organs_per_clonotype)) + 
+  geom_bar(aes(fill = n_organs_per_clonotype), colour = "grey") +
+  theme_minimal() +
+  labs(x = "RNA Clusters", y = "Number of Cells") +
+  facet_grid(. ~ Infection, scales = "free_x", space = "free_x")  # Remove the fill legend
+
+ggplot(df, aes(x = RNA_clusters, fill= n_organs_per_clonotype)) + 
+  geom_bar(aes(fill = n_organs_per_clonotype), colour = "grey") +
+  theme_minimal() +
+  labs(x = "RNA Clusters", y = "Number of Cells") +
+  facet_grid(. ~ Mouse_New, scales = "free_x", space = "free_x")  # Remove the fill legend
+```
+
+Here, we separate by the number of organs and the number of clusters in which a particular clonotype is found. As you can see, a majority of the cells have clonotypes that are only in cluster 5, however the clonotypes found in two clusters (or what we can assume are cell-types), are in both the infected and non-infected mice (except Candida infected male). However, the Candida infected female is the only mouse to have clonotypes found in all three organs. 
