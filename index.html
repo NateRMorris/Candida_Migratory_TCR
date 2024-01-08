@@ -1,13 +1,110 @@
+<!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>Candida Migratory TCR Project</title>
     <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
-    <h1>Candida Migratory TCR Project</h1>
-    <a href="/Candida_Migratory_TCR/contact.html">Contact Information of Nate Morris</a>
-    <p>Project Introduction</p>
-</body>
-</html>
+    <header>
+        <h1>Candida Migratory TCR Project</h1>
+        <nav>
+            <ul>
+                <li><a href="/Candida_Migratory_TCR/contact.html">Contact</a></li>
+                <li><a href="#project-introduction">Project Introduction</a></li>
+                <li><a href="#r-scripts">R Scripts</a></li>
+                <li><a href="#tcr-scripts">TCR Scripts</a></li>
+                <li><a href="#python-scripts">Python Scripts</a></li>
+                <li><a href="#data">Data</a></li>
+                <li><a href="#figures-tables">Figures & Tables</a></li>
+                <li><a href="#tcr-packages">TCR Packages</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <section id="project-introduction">
+        <h2>Project Introduction</h2>
+        <p>.</p>
+    </section>
+
+    <section id="r-scripts">
+        <h2>R Scripts for scRNA/Cite-Seq Analysis</h2>
+        <p>Scripts related to scRNA analysis and clustering.</p>
+        <ul>
+            <li>
+                <a href="/Candida_Migratory_TCR/Scripts/R/sc_RNA_scripts/Candida_sc_QC.Rmd">Candida_sc_QC.Rmd</a>
+                - Quality control for single-cell RNA-seq data.
+            </li>
+            <li>
+                <a href="/Candida_Migratory_TCR/Scripts/R/sc_RNA_scripts/Candida_sc_Analysis_11_02_2023.Rmd">Candida_sc_Analysis_11_02_2023.Rmd</a>
+                - Analysis of single-cell data, including dimension reduction, clustering, differential abundance analysis, identifying marker genes, cell type annotations, pseudotime analysis and cell-signaling analysis  (date: 11/02/2023).
+            </li>
+            <li>
+                <a href="/Candida_Migratory_TCR/Scripts/R/sc_RNA_scripts/Candida_sc_Analysis_11_02_2023.Rmd">Candida_sc_Analysis_11_02_2023.Rmd</a>
+                - Analysis of single-cell data updated version (date: 01/08/2024).
+            </li>
+            <li>
+                <a href="/Candida_Migratory_TCR/Scripts/R/sc_RNA_scripts/Candida_sc_clust5_analysis.Rmd">Candida_sc_clust5_analysis.Rmd</a>
+                - Sub-clustering analysis for particular cluster of interest in scRNA-seq data.
+                <ul>
+                    <li><a href="/Candida_Migratory_TCR/Scripts/R/sc_RNA_scripts/WNN_script/Candida_sc_Analysis_WNN.Rmd">Candida_sc_Analysis_WNN.Rmd</a>
+                        - Weighted nearest neighbor analysis for integration of scRNA with Cite-Seq surface protein assay.</li>
+                </ul>
+            </li>
+        </ul>
+        <p>GitHub Repository: <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/sc_RNA_scripts" target="_blank">R Scripts Repository</a></p>
+    </section>
+
+    <section id="tcr-scripts">
+        <h2>R Scripts for TCR Analysis and Integration</h2>
+        <p>Scripts related to TCR analysis and diversity.</p>
+        <ul>
+            <li><a href="/Candida_Migratory_TCR/Scripts/R/tcr_Scripts/Candida_tcr_paired.Rmd">Candida_tcr_paired.Rmd</a>
+                - Indentifying and analyzing TCR sequences that are identical and found in cells from multiple organs, also considered "paired across organ", or migratory between organ.</li>
+            <li><a href="/Candida_Migratory_TCR/Scripts/R/tcr_Scripts/Candida_tcr_duplicate.Rmd">Candida_tcr_duplicate.Rmd</a>
+                - Identification and analyzing "duplicate" TCR sequences, which are found in multiple cells and therefore are proliferating.</li>
+            <li><a href="/Candida_Migratory_TCR/Scripts/R/tcr_Scripts/Candida_tcr_seurat_integration.Rmd">Candida_tcr_seurat_integration.Rmd</a>
+                - Integration of TCR data with Seurat scRNA data.</li>
+            <li><a href="/Candida_Migratory_TCR/Scripts/R/tcr_Scripts/Candida_tcr_Diversity.Rmd">Candida_tcr_Diversity.Rmd</a>
+                - Diversity analysis of TCR sequences.</li>
+            <li><a href="/Candida_Migratory_TCR/Scripts/R/tcr_Scripts/Candida_tcr_clust5.Rmd">Candida_tcr_clust5.Rmd</a>
+                - TCR analysis of particular cluster of interest.</li>
+            <li><a href="/Candida_Migratory_TCR/Scripts/R/tcr_Scripts/Candida_tcr_Gearty_assumption.Rmd">Candida_tcr_Gearty_assumption.Rmd</a>
+                - Analysis based on Gearty's assumptions.</li>
+            <li><a href="/Candida_Migratory_TCR/Scripts/R/tcr_Scripts/Candida_tcr_Cytoscape.Rmd">Candida_tcr_Cytoscape.Rmd</a>
+                - Visualization using Cytoscape.</li>
+        </ul>
+        <p>GitHub Repository: <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/tcr_Scripts" target="_blank">TCR Scripts Repository</a></p>
+    </section>
+
+    <section id="python-scripts">
+        <h2>Python Scripts</h2>
+        <p>Scripts related to TCR analysis using Python.</p>
+        <ul>
+            <li><a href="/Candida_Migratory_TCR/Scripts/R/py_scripts/TCR_Scipy.ipynb">TCR_Scipy.ipynb</a>
+                - Using scipy for TCR analysis.</li>
+        </ul>
+        <p>GitHub Repository: <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/py_scripts" target="_blank">TCR Scripts Repository</a></p>
+    </section>
+
+    <section id="tcr_Packages">
+        <h2>TCR Packages</h2>
+        <p>Package information used in analysis.</p>
+        <ul>
+            <li><a href="/Candida_Migratory_TCR/blob/main/tcr_Packages/migratory_tcr.yml">TCR_Scipy.ipynb</a>
+                - Environment file to reconstruct dependencies necessary for python analysis.</li>
+            <li><a href="/Candida_Migratory_TCR/tree/main/tcr_Packages/Cytoscape%20Fig">TCR_Scipy.ipynb</a>
+                - Cytoscape figure and file to remake figure.</li>
+        </ul>
+        <p>GitHub Repository: <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/tcr_Packages" target="_blank">TCR Scripts Repository</a></p>
+    </section>
+
+    <section id="Figures_Tables">
+        <h2>Figures/Tables</h2>
+        <p>Figures and Tables created during analysis, including Cytoscape Plots and Differentially Expressed Genes/Surface proteins per cluster and organ</p>
+
+        <p>GitHub Repository: <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/tcr_Packages" target="_blank">TCR Scripts Repository</a></p>
+    </section>
