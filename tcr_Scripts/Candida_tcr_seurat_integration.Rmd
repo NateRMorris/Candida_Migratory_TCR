@@ -54,8 +54,74 @@ library(data.table)
 
 ## 4.A - Adding TCR Metadata
 ```{r}
+DefaultAssay(seurat_object_prefiltered) <- "RNA"
+
 seurat_object_prefiltered@meta.data[["TCR"]] <- seurat_object_prefiltered@meta.data[["cell_barcode"]] %in% IGT27_TCR$Barcode
 
+seurat_object_prefiltered$clonotype_frequency <- IGT27_TCR[match(seurat_object_prefiltered@meta.data[["cell_barcode"]], IGT27_TCR$Barcode),]$Clonotype_frequency
+
+seurat_object_prefiltered$clonotype_frequency[is.na(seurat_object_prefiltered$clonotype_frequency)] <- 0
+
+
+```
+
+
+## Creating New Seurat Object with all cells and TCR information
+```{r}
+seurat_object_new <- seurat_object_prefiltered %>% NormalizeData(verbose = FALSE) %>% FindVariableFeatures(selection.method = "vst", nfeatures = 4000) %>% ScaleData(verbose = TRUE)
+seurat_object_new_new <- seurat_object_new %>% RunPCA(pc.genes = t_cells@var.genes, npcs = 30, verbose = FALSE) %>% RunUMAP(dims = 1:25) %>% RunTSNE(dims = 1:25) %>% FindNeighbors(dims = 1:25,compute.SNN=TRUE) %>% FindClusters(resolution = c(0.1,0.2,0.4,0.8,1)) %>% DoopenTSNE(reduction_save = "openTSNE",dims_use = 1:25) 
+
+
+```
+
+```{r}
+seurat_object_new_new$clonotype <- IGT27_TCR[match(seurat_object_new_new@meta.data[["cell_barcode"]], IGT27_TCR$Barcode),]$clonotype
+
+table(rev(sort(table(seurat_object_new_new$clonotype))))
+
+Idents(object = seurat_object_new_new) <- "clonotype"
+
+seurat_object_new_new$clonotype_frequency <- IGT27_TCR[match(seurat_object_new_new@meta.data[["cell_barcode"]], IGT27_TCR$Barcode),]$Clonotype_frequency
+
+table(rev(sort(table(seurat_object_new_new$clonotype))))
+
+seurat_object_new_new@meta.data[["paired_across_organ"]] <- seurat_object_new_new@meta.data[["cell_barcode"]] %in% IGT27_TCR$Barcode[IGT27_TCR$paired_across_organ == TRUE]
+
+Idents(object = seurat_object.TCR) <- "paired_across_organ"
+
+seurat_object_new_new@meta.data[["paired_across_organ"]]<- as.factor(seurat_object_new_new$paired_across_organ)
+
+seurat_object_new_new@meta.data[["duplicate"]] <- seurat_object_new_new@meta.data[["cell_barcode"]] %in% IGT27_TCR$Barcode[IGT27_TCR$duplicate == TRUE]
+
+Idents(object = seurat_object_new_new) <- "duplicate"
+
+seurat_object_new_new@meta.data[["duplicate"]]<- as.factor(seurat_object_new_new$duplicate)
+```
+
+```{r}
+#DimPlot(seurat_object_new_new, reduction = "umap_rna", group.by = "TCR") + ggtitle("TCR Seq by RNA UMAP")
+
+DimPlot(seurat_object_new_new, reduction = "openTSNE", group.by = "RNA_clusters", label = TRUE, split.by = "Infection")
+```
+
+
+```{r}
+DimPlot(seurat_object_new_new, reduction = "umap_rna", group.by = "TCR") + ggtitle("TCR Seq by RNA UMAP")
+DimPlot(seurat_object_new_new, reduction = "umap_rna", group.by = "TCR", split.by = "Infection") + ggtitle("TCR Seq by RNA UMAP")
+
+DimPlot(seurat_object_new_new, reduction = "openTSNE", group.by = "TCR") + ggtitle("TCR Seq by RNA UMAP")
+DimPlot(seurat_object_new_new, reduction = "openTSNE", group.by = "TCR", split.by = "Infection") + ggtitle("TCR Seq by RNA UMAP")
+```
+
+
+```{r}
+#setwd(data_dir)
+saveRDS(seurat_object_new_new, file = paste0(data_dir, "seurat_new_12_08.rds"))
+```
+
+
+# Adding for Only TCR samples
+```{r}
 Idents(object = seurat_object_prefiltered) <- "TCR"
 
 seurat_object.TCR <- subset(x = seurat_object_prefiltered, subset = (TCR == TRUE))
@@ -129,17 +195,25 @@ DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "clonotype_frequen
 
 DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "clonotype_frequency", split.by = "duplicate") + ggtitle("Clonotype Freq by RNA UMAP split by Duplicate")
 ```
+
+## 4.C-2 Clonotype Freq Group by Mouse
+
+For here, if we choose to use our seurat_object.TCR, then we get the % of all TCR clonotypes that have n = 1, n = 2, and n > 3 proliferation.
+
+However, if we use the seurat_object_prefiltered, then we get the % of all cells that have n = 0, n = 1, n = 2 and n > 3 proliferation.
+
 ```{r}
-TCR_clonotype_freq <- as.data.frame(table(seurat_object.TCR$clonotype_frequency, seurat_object.TCR$Mouse_New))
+TCR_clonotype_freq <- as.data.frame(table(seurat_object_prefiltered$clonotype_frequency, seurat_object_prefiltered$Mouse_New))
 colnames(TCR_clonotype_freq)[1] <- "Clonotype_Freq"
 colnames(TCR_clonotype_freq)[2] <- "Mouse"
 
 TCR_clonotype_freq <- TCR_clonotype_freq %>%
     group_by(Mouse) %>%
     summarise(
+        "No TCR" = sum(Freq[Clonotype_Freq == 0]) / sum(Freq) * 100,
         "n = 1" = sum(Freq[Clonotype_Freq == 1]) / sum(Freq) * 100,
         "n = 2" = sum(Freq[Clonotype_Freq == 2]) / sum(Freq) * 100,
-        "n > 3" = sum(Freq[Clonotype_Freq %in% c("4", "5", "6", "14")]) / sum(Freq) * 100
+        "n > 3" = sum(Freq[!Clonotype_Freq %in% c("0", "1", "2")]) / sum(Freq) * 100
     ) %>%
     ungroup()
 
@@ -160,19 +234,66 @@ ggplot(TCR_clonotype_freq_percentages_long, aes(x = Mouse, y = Percentage, fill 
   theme(legend.position = "right")
 
 
+level_order <- c('No TCR', 'n = 1', 'n = 2', 'n > 3') 
+
 # Plot the faceted barplot
-ggplot(TCR_clonotype_freq_percentages_long, aes(x = Clonotype, y = Percentage, fill = Clonotype)) +
+ggplot(TCR_clonotype_freq_percentages_long, aes(factor(Clonotype, level = level_order), y = Percentage, fill = Clonotype)) +
   geom_bar(stat = "identity") +
-  geom_text(aes(label = substr(as.character(Percentage), 0, 4)), position = position_stack(vjust = 0.5)) +
+  geom_text(aes(label = substr(as.character(Percentage), 0, 4)), position = position_stack(vjust = 0.5), angle = 45, size = 6) +
   labs(title = "Stacked Barplot of Frequency Percentages by Mouse",
-       x = "Mouse",
-       y = "Percentage",
+       x = "Size of Clonotype for each Cell",
+       y = "Percentage of all Cells",
        fill = "Number of Cells with identical Clonotype") +
-  theme(legend.position = "right") + facet_wrap( ~ Mouse)
+  theme(legend.position = "right", axis.text.x = element_text(angle = 45, hjust=1)) + facet_wrap( ~ Mouse)
 ```
 
+## 4.C-3 Clonotype Freq Group by Cluster
+
+```{r}
+TCR_clonotype_freq <- as.data.frame(table(seurat_object_prefiltered$clonotype_frequency, seurat_object_prefiltered$RNA_clusters))
+colnames(TCR_clonotype_freq)[1] <- "Clonotype_Freq"
+colnames(TCR_clonotype_freq)[2] <- "Cluster"
+
+TCR_clonotype_freq <- TCR_clonotype_freq %>%
+    group_by(Cluster) %>%
+    summarise(
+        "No TCR" = sum(Freq[Clonotype_Freq == 0]) / sum(Freq) * 100,
+        "n = 1" = sum(Freq[Clonotype_Freq == 1]) / sum(Freq) * 100,
+        "n = 2" = sum(Freq[Clonotype_Freq == 2]) / sum(Freq) * 100,
+        "n > 3" = sum(Freq[!Clonotype_Freq %in% c("0", "1", "2")]) / sum(Freq) * 100
+    ) %>%
+    ungroup()
+
+TCR_clonotype_freq_percentages_long <- TCR_clonotype_freq%>%
+  pivot_longer(cols = starts_with("n"), 
+               names_to = "Clonotype", 
+               values_to = "Percentage")
+
+# Plot the stacked barplot
+ggplot(TCR_clonotype_freq_percentages_long, aes(x = Cluster, y = Percentage, fill = Clonotype)) +
+  geom_bar(stat = "identity", position = position_stack(reverse = TRUE)) +
+  geom_text(aes(label = substr(as.character(Percentage), 0, 4), group = Clonotype), position = position_stack(vjust = 0.5, reverse = TRUE), size = 3) +
+  labs(title = "Stacked Barplot of Frequency Percentages by Cluster",
+       x = "Cluster",
+       y = "Percentage",
+       fill = "Clone Size") +
+  scale_fill_manual(values = c("n = 1" = "blue", "n = 2" = "green", "n > 3" = "red")) +
+  theme(legend.position = "right")
 
 
+level_order <- c('No TCR', 'n = 1', 'n = 2', 'n > 3') 
+
+# Plot the faceted barplot
+ggplot(TCR_clonotype_freq_percentages_long, aes(factor(Clonotype, level = level_order), y = Percentage, fill = Clonotype)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = substr(as.character(Percentage), 0, 4)), position = position_stack(vjust = 1.2), angle = 45, size = 3.5) +
+  ylim(-5,110) +
+  labs(title = "Stacked Barplot of Frequency Percentages by Cluster",
+       x = "Cluster",
+       y = "Percentage",
+       fill = "Number of Cells with identical Clonotype") +
+  theme(legend.position = "right", axis.text.x = element_text(angle = 45, hjust=1)) + facet_wrap( ~ Cluster)
+```
 
 ## 4.C UMAP with Clonotype Frequency Scores as Sizes
 
@@ -591,13 +712,14 @@ ggplot(data_melted_mouse, aes(x = reorder(Row, -Frequency, sum), y = Frequency, 
   # Sample Faceted
 data_melted_mouse <- data_melted_mouse[data_melted_mouse$Frequency > 0,]
 data_melted_mouse$Infection <- substring(data_melted_mouse$Sample, 4, 5)
+data_melted_mouse$Percentage <- (data_melted_mouse$Frequency)*100
 
-ggplot(data_melted_mouse, aes(x = reorder(Row, -Frequency, sum), y = Frequency, fill = Sample)) +
+ggplot(data_melted_mouse, aes(x = reorder(Row, -Percentage, sum), y = Percentage, fill = Sample)) +
   geom_bar(stat = "identity") +
   labs(
     title = "Stacked Barplot of Clonotype Frequencies by Mouse",
     x = "Clonotype",
-    y = "Frequency") +
+    y = "% Clonotype Make up of Each Mouse's Cells") +
   theme_minimal() + facet_grid(. ~ Sample) +
   theme(legend.position = "top", axis.text.x = element_text(angle = 45, hjust = 1)) + coord_flip()
 
@@ -606,13 +728,14 @@ ggplot(data_melted_mouse, aes(x = reorder(Row, -Frequency, sum), y = Frequency, 
 data_melted_mouse <- as.data.frame(t(normalize_df_by_Mouse[rownames(normalize_df_by_Mouse) != "Total_Freq", ])) %>%
   rownames_to_column(var = "Row") %>%
   pivot_longer(cols = -Row, names_to = "Sample", values_to = "Frequency")
+data_melted_mouse$Percentage <- (data_melted_mouse$Frequency)*100
 
-ggplot(data_melted_mouse, aes(x = reorder(Row, -Frequency, sum), y = Frequency, fill = Sample)) +
+ggplot(data_melted_mouse, aes(x = reorder(Row, -Frequency, sum), y = Percentage, fill = Sample)) +
   geom_bar(stat = "identity") +
   labs(
     title = "Stacked Barplot of Clonotype Frequencies by Mouse",
     x = "Clonotype",
-    y = "Frequency",
+    y = "% of Each Mouses Cells with Each Clonotype",
     fill = "Mouse") +
   theme_minimal() +
   theme(legend.position = "top", axis.text.x = element_text(angle = 45, hjust = 1)) + coord_flip()
@@ -784,7 +907,7 @@ rownames(cluster_simp_df) <- paste0("cluster_", seq(0,16))
 cluster_simp_df$Cluster <- rownames(cluster_simp_df)
 
 
-ggplot(cluster_simp_df, aes(x = Cluster, y = simp_Score, color = Cluster)) +
+ggplot(cluster_simp_df[cluster_simp_df$Cluster != "cluster_16",], aes(x = Cluster, y = simp_Score, color = Cluster)) +
   geom_point(size = 3) +
   labs(
     title = "Dotplot of Simpsons Diversity Score by Cluster",
@@ -924,19 +1047,19 @@ df_long_gs$inf_clust <- paste0(df_long_gs$Infection, ".", df_long_simp$Cluster)
 # Choose which one you want
 #df_long <- df_long_simp[df_long_simp$Cluster != "cluster_16",]
 
-df_long <- df_long_gini[df_long_gini$Cluster != "cluster_16",]
+df_long <- df_long_gs[df_long_gs$Cluster != "cluster_16",]
 
 ggplot(df_long, aes(x = Cluster, y = Value, color = sample, shape = Infection)) +
   geom_point() +
-  labs(x = "Cluster", y = "Gini Index Value") +
+  labs(x = "Cluster", y = "Simpson Index Value") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  ggtitle("Gini Diversity Index by Cluster and Sample")
+  ggtitle("Simpson Diversity Index by Cluster and Sample")
 
 ggplot(df_long, aes(x = Infection, y = Value, color = sample)) +
   geom_boxplot() +
   labs(
     x = "Condition",
-    y = "Gini Index Value",
+    y = "Simpson Index Value",
     title = "Boxplot of Frequency by Cluster and Condition"
   ) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) + facet_grid(. ~ Cluster) +
@@ -1197,6 +1320,125 @@ SaveH5Seurat(seurat_object_pseudo, filename = "seurat.h5Seurat")
 Convert("seurat.h5Seurat", dest = "h5ad")
 ```
 
+## 5.H TCR Clustering
+
+```{r}
+cdr3_clustering <- so_vdj |>
+  cluster_sequences(
+    data_col = "cdr3",
+    chain    = "TRB")
+
+cdr3_clustering |>
+  plot_scatter(
+    x = "cdr3_UMAP_1",
+    y = "cdr3_UMAP_2",
+    data_col = "cdr3_cluster_0.5")
+
+cdr3_clustering |>
+  plot_scatter(
+    x = "cdr3_UMAP_1",
+    y = "cdr3_UMAP_2",
+    data_col = "Mouse_New"
+  )
+
+cdr3_clustering |>
+  plot_frequency(
+    data_col    = "cdr3_cluster_0.5",
+    cluster_col = "sample_name")
+
+cdr3_clustering |>
+  plot_frequency(
+    data_col    = "cdr3_cluster_0.5",
+    cluster_col = "Infection")
+
+cdr3_clustering |>
+  plot_frequency(
+    data_col    = "cdr3_cluster_0.5",
+    cluster_col = "RNA_new")
+```
+
+```{r}
+df <- as.data.frame(table(cdr3_clustering$RNA_new, cdr3_clustering$cdr3_cluster_0.5))
+colnames(df) <- c("RNA_new", "CDR3_Clust", "Freq")
+
+percentage_data <- df %>%
+  group_by(RNA_new) %>%
+  mutate(percentage = Freq / sum(Freq) * 100) %>%
+  ungroup()
+
+# Create a ggplot barplot
+ggplot(percentage_data, aes(x = RNA_new, y = percentage, fill = CDR3_Clust)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = "RNA_clusters", y = "Percentage") +
+  scale_fill_discrete(name = "CDR3_Clust") +
+  theme_minimal()
+```
+
+
+```{r}
+df <- as.data.frame(table(cdr3_clustering$Infection, cdr3_clustering$cdr3_cluster_0.5))
+colnames(df) <- c("sample_name", "CDR3_Clust", "Freq")
+
+percentage_data <- df %>%
+  group_by(sample_name) %>%
+  mutate(percentage = Freq / sum(Freq) * 100) %>%
+  ungroup()
+
+my_comparisons <- list(c("No", "Ca"))
+
+# Create a ggplot barplot
+ggplot(percentage_data, aes(x = sample_name, y = percentage, fill = CDR3_Clust)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Condition", y = "Percentage of Condition Cells in Each CDR3 Clust") +
+  scale_fill_discrete(name = "Sample") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + facet_wrap(~CDR3_Clust) +
+  stat_compare_means(comparisons = my_comparisons, method = "t.test", label =  "p.signif", paired = FALSE)
+```
+
+```{r}
+df <- as.data.frame(table(cdr3_clustering$Mouse_New, cdr3_clustering$cdr3_cluster_0.5))
+colnames(df) <- c("Mouse", "CDR3_Clust", "Freq")
+
+percentage_data <- df %>%
+  group_by(Mouse) %>%
+  mutate(percentage = Freq / sum(Freq) * 100) %>%
+  ungroup()
+
+percentage_data$infection <- substr(percentage_data$Mouse,0,3)
+
+my_comparisons <- list(c("No", "Ca"))
+
+# Create a ggplot barplot
+ggplot(percentage_data, aes(x = Mouse, y = percentage, fill = infection)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Condition", y = "Percentage of Condition Cells in Each CDR3 Clust") +
+  scale_fill_discrete(name = "Sample") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + facet_wrap(~CDR3_Clust)
+```
+
+
+```{r}
+df <- as.data.frame(table(cdr3_clustering$sample_name, cdr3_clustering$cdr3_cluster_0.5))
+colnames(df) <- c("sample_name", "CDR3_Clust", "Freq")
+
+percentage_data <- df %>%
+  group_by(sample_name) %>%
+  mutate(percentage = Freq / sum(Freq) * 100) %>%
+  ungroup()
+
+percentage_data$organ <- substr(percentage_data$sample_name,4,7)
+percentage_data$infection <- substr(percentage_data$sample_name,0,2)
+
+# Create a ggplot barplot
+ggplot(percentage_data, aes(x = sample_name, y = percentage, fill = substr(sample_name,0,2))) +
+  geom_bar(stat = "identity") +
+  labs(x = "Sample", y = "Percentage of Sample's Cells in CDR3 Clust") +
+  scale_fill_discrete(name = "Condition") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + facet_wrap(~CDR3_Clust+organ) 
+  
+```
+
+
 # 6. Immunarch
 https://immunarch.com/articles/web_only/v3_basic_analysis.html
 ```{r}
@@ -1328,7 +1570,6 @@ vis(geneUsageAnalysis(imm_gu, "cosine+hclust", .verbose = F))
 imm_cl_pca <- geneUsageAnalysis(imm_gu, "js+pca+kmeans", .verbose = F)
 p1 <- vis(imm_cl_pca, .plot = "clust")
 ```
-
 
 # 7. TCR Beta similarities 
 
@@ -1496,23 +1737,26 @@ length(lame0$clonotype) + length(lame1$clonotype) + length(lame$clonotype)
 
 
 # GO Enrichment of Paired
-```{r}
+
+There is nothing significantly different between paired samples with and without infection
+```
 Idents(object = seurat_object.TCR) <- "paired_across_organ"
 
 seurat_object.TCR.paired <- subset(x = seurat_object.TCR, subset = (paired_across_organ == TRUE))
 
-Idents(seurat_object.TCR.dup) <- "Infection"
-DefaultAssay(seurat_object.TCR.dup) <- "RNA"
-dup_ca_markers <- FindMarkers(seurat_object.TCR.dup, ident.1 = "Ca", only.pos = TRUE,  min.pct = 0.05,logfc.threshold = 0.05)
-dup_ca_markers$entrezid <- mapIds(org.Mm.eg.db, keys = rownames(dup_ca_markers), column = "ENTREZID", keytype = "SYMBOL") # Could also use ENSEMBL instead of ENTREZ
-dup_ca_go_terms_bp <- enrichGO(dup_ca_markers$entrezid, "org.Mm.eg.db", keyType = "ENTREZID", ont = "BP", pvalueCutoff = 0.05, pAdjustMethod = "BH")
-dotplot(dup_ca_go_terms_bp, showCategory=10) + ggtitle("Duplicate infection")
+Idents(seurat_object.TCR.paired) <- "Infection"
+DefaultAssay(seurat_object.TCR.paired) <- "RNA"
+paired_ca_markers <- FindMarkers(seurat_object.TCR.paired, ident.1 = "Ca", only.pos = TRUE,  min.pct = 0.05,logfc.threshold = 0.05)
+paired_ca_markers$entrezid <- mapIds(org.Mm.eg.db, keys = rownames(paired_ca_markers), column = "ENTREZID", keytype = "SYMBOL") # Could also use ENSEMBL instead of ENTREZ
+paired_ca_go_terms_bp <- enrichGO(paired_ca_markers$entrezid, "org.Mm.eg.db", keyType = "ENTREZID", ont = "BP", pvalueCutoff = 0.05, pAdjustMethod = "BH")
+dotplot(paired_ca_go_terms_bp, showCategory=10) + ggtitle("Duplicate infection")
 ```
 
 
 # GO Enrichment of Duplicate
 
-```{r}
+There is nothing significantly different between duplicate samples with and without infection
+```
 Idents(object = seurat_object.TCR) <- "duplicate"
 
 seurat_object.TCR.dup <- subset(x = seurat_object.TCR, subset = (duplicate == TRUE))
@@ -1525,7 +1769,7 @@ dup_ca_go_terms_bp <- enrichGO(dup_ca_markers$entrezid, "org.Mm.eg.db", keyType 
 dotplot(dup_ca_go_terms_bp, showCategory=10) + ggtitle("Duplicate infection")
 ```
 
-# 8. Gene/Protein Expression in Clusters of Interest
+# 8. Gene/Protein Expression in Clusters of Interest Inf vs Noninf
 
 Therefore, I devised this analysis:
 
@@ -1715,6 +1959,8 @@ https://www.pnas.org/doi/10.1073/pnas.1420370112 - Immune-checkpoint proteins VI
 
 VISTA is an activating receptor in human monocytes
 https://pubmed.ncbi.nlm.nih.gov/34106206/ - But also VISTA has been linked to activation
+https://www.nature.com/articles/s41598-017-01411-1 - Immune-checkpoint protein VISTA critically regulates the IL-23/IL-17 inflammatory axis 
+
 
 The role of CD45 and CD45-associated molecules in T cell activation
 https://pubmed.ncbi.nlm.nih.gov/9429890/ - CD45 is essential for the activation of T cells via the TCR

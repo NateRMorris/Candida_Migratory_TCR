@@ -184,7 +184,7 @@ DefaultAssay(object = seurat_object) <- "RNA"
 print("The number of mitochondrial genes in the RNA assay is: ")
 length(grep("^MT", lapply(rownames(seurat_object[["RNA"]]), toupper))) # There are 113 mitochondrial genes
 
-seurat_object[["percent.mt"]] <- PercentageFeatureSet(seurat_object, pattern = "^mt-")
+seurat_object[["percent.mt"]] <- PercentageFeatureSet(seurat_object, pattern = "^MT-")
 ```
 
 Checking RNA Outliers Visually
@@ -280,23 +280,34 @@ seurat_object[["percent.mt"]] <- PercentageFeatureSet(seurat_object, pattern = "
 
 Question - Based on the fact that biological data should be distributed normally, are we okay with using the median +/- 3*STDEV as the cutoff for outlier cells within both the RNA and ADT?
 
+# Demultiplex using HTOs
+
+This was already done for us, so we don't need most likely.
+
+```
+table(seurat_object$HTO_classification.simplified, seurat_object$sample_name)
+
+```
+
 Additional QC Plots
 ```{r}
 Idents(seurat_object) <- 'sample_name'
 
-RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 1)
+p1 <- RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 2)
 
 Idents(seurat_object) <- 'Organ'
 
-RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 1)
+p2 <- RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 2)
 
 Idents(seurat_object) <- 'Mouse'
 
-RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 1)
+p3 <- RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 2)
 
 Idents(seurat_object) <- 'Infection'
 
-RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 1)
+p4 <- RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 2)
+
+grid.arrange(p1, p2, p3, p4, ncol = 2)
 
 FeatureScatter(seurat_object, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
 FeatureScatter(seurat_object, feature1 = "nCount_ADT", feature2 = "nFeature_ADT")
