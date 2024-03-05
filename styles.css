@@ -58,3 +58,7 @@ a:hover {
     text-decoration: underline; /* Underline the link */
 }
 
+section ul {
+    margin-top: 20px; /* Add space above each <ul> element */
+    margin-bottom: 20px; /* Add space below each <ul> element */
+}
