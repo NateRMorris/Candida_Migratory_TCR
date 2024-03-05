@@ -20,7 +20,7 @@ setwd(data_dir)
 
 Here, we use the pre-existing seurat object.
 ```{r}
-seurat_object_unfiltered <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT.Rds"))
+seurat_object <- readRDS(file = paste0(data_dir, "/dataset_w_annot.rds"))
 
 #seurat_object_WNN <- readRDS("Candida_ds_clean_WNN.rds") # I didn't include WNN analysis in this document
 #seurat_object <- readRDS(file = paste0(data_dir, "dataset_post_sc_Analysis.rds")) #If you want without WNN Clusters and without TCR Information
@@ -377,3 +377,66 @@ ggplot(compare_mouse_df_long, aes(x = Mouse, y = Frequency, fill = FrequencyType
 ```
 compare_df
 ```
+
+# Using the mcPAS-TCR database
+
+http://friedmanlab.weizmann.ac.il/McPAS-TCR/
+
+```
+mcPAS <- read.table(paste0(data_dir,"/mcPAS-TCR/McPAS-TCR.csv"), header = TRUE, sep = ",")
+
+mcPAS_nona <- mcPAS[!is.na(mcPAS$CDR3.alpha.aa) & !is.na(mcPAS$CDR3.beta.aa),]
+
+mcPAS_nona$CDR3 <- paste0(mcPAS_nona$CDR3.alpha.aa, mcPAS_nona$CDR3.beta.aa)
+
+IGT27_TCR_try <- IGT27_TCR
+
+IGT27_TCR_try$CDR3_all <- paste0(IGT27_TCR_try$AA.JUNCTION_alpha, IGT27_TCR_try$AA.JUNCTION_beta)
+
+  
+cdr3_matching <- function(list1, list2) {
+  matched_pairs <- list()
+  for (cdr3_1 in list1) {
+    for (cdr3_2 in list2) {
+      if (abs(nchar(cdr3_1) - nchar(cdr3_2)) <= 1) {  # Check if the length difference is at most 1
+        mismatch_count <- sum(strsplit(cdr3_1, "")[[1]] != strsplit(cdr3_2, "")[[1]])
+        if (mismatch_count <= 1) {
+          matched_pairs <- c(matched_pairs, list(cdr3_1, cdr3_2))
+        }
+      }
+    }
+  }
+  return(matched_pairs)
+}
+
+igt27list <- list(IGT27_TCR_try$CDR3_all)
+mcpaslist <- list(mcPAS_nona$CDR3)
+
+cdr3_matching(IGT27_TCR_try$igt27list, mcpaslist)
+
+
+average_length <- function(string) {
+  lengths <- nchar(string)  # Get the lengths of each string
+  avg_length <- mean(lengths)  # Calculate the average length
+  return(avg_length)
+}
+
+
+average_lengths_IGT27 <- sapply(IGT27_TCR_try$CDR3_all, average_length)
+average_lengths_mcPAS <- sapply(list(mcPAS_nona$CDR3), average_length)
+
+```
+
+```{r}
+cdr3_list <- cat(IGT27_TCR$AA.JUNCTION_beta, sep = "\n")
+
+file_path <- "/cdr3_output.txt"
+
+# Write the list elements to a text file
+writeLines(cdr3_list, paste0(data_dir,file_path))
+
+write.table(noquote(IGT27_TCR$AA.JUNCTION_beta), file = paste0(data_dir,file_path), sep = "\n",
+            row.names = FALSE, col.names = FALSE, quote = FALSE)
+```
+
+

@@ -1,0 +1,779 @@
+---
+title: "Candida_sc_Pseudotime"
+author: "Nathan Morris"
+date: "2024-01-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Data Import
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+# Data Import
+library(Seurat)
+library(scater)
+library(dplyr)
+library(SingleR)
+library(celldex)
+library(scRNAseq)
+library(scran)
+library(gridExtra)
+library(pheatmap)
+library(ess)
+library(reshape2)
+library(ggpubr)
+library(scCustomize)
+library(gridExtra)
+library(monocle3)
+
+## For Reticulate (Python-R wrapper)
+conda_list()
+use_condaenv("r-reticulate")    #activate an environment e.g py2_env
+py_install("opentsne")
+reticulate::py_install("phate", pip=TRUE)
+devtools::install_github("KrishnaswamyLab/phateR")
+py_install("fa2")
+
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+```
+
+```{r}
+seurat_object <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT_new_metadata.Rds"))
+```
+
+# 9. CytoTrace
+```{r}
+library(CytoTRACE)
+data_tmp <- as.matrix(GetAssayData(object = seurat_object , slot = "counts", assay="RNA"))
+results <- CytoTRACE(data_tmp, subsamplesize = 1000)
+phenotype = as.character(seurat_object$CD_annot)
+names(phenotype) <- rownames(seurat_object[[]])
+plotCytoTRACE(results, phenotype = phenotype, emb=seurat_object[["umap_both_"]]@cell.embeddings)
+```
+
+
+## CytoTRACE
+```{r}
+library(CytoTRACE)
+data_tmp <- as.matrix(GetAssayData(object = seurat_object_CD4, slot = "counts", assay="RNA"))
+results <- CytoTRACE::CytoTRACE(data_tmp, subsamplesize = 1000)
+phenotype = as.character(seurat_object_CD4$CD4_clust_annot)
+names(phenotype) <- rownames(seurat_object_CD4[[]])
+CytoTRACE::plotCytoTRACE(results, phenotype = phenotype, emb=seurat_object_CD4[["fa2_cd4_"]]@cell.embeddings)
+
+plotCytoTRACE(results, phenotype = phenotype, emb=seurat_object_CD4[["fa2_cd4_"]]@cell.embeddings, gene = "Sell")
+```
+
+# 10. Pseudotime Analysis
+
+I've decided it's best to do it for CD4 and CD8 cells for each individual organ.
+```{r}
+#devtools::install_github("satijalab/seurat-wrappers")
+library(monocle3)
+```
+
+```
+DefaultAssay(seurat_object) <- "RNA"
+
+seurat_object.colon <- subset(x = seurat_object, subset = (Organ == "Colon"))
+seurat_object.lung <- subset(x = seurat_object, subset = (Organ == "Lung"))
+seurat_object.mlns <- subset(x = seurat_object, subset = (Organ == "mLns"))
+```
+
+
+
+# Psuedotime CD4 Only
+
+```{r}
+seurat_object_CD4 <- readRDS(file = paste0(data_dir, "seurat_object_CD4.rds"))
+#seurat_object_CD4_diff <- readRDS(file = paste0(data_dir, "seurat_object_CD4_diff.rds"))
+```
+
+```{r}
+DefaultAssay(seurat_object_CD4) <- "RNA"
+```
+
+```{r}
+CD4_clust <- seurat_object_CD4$CD4_clust_annot
+seurat <- seurat_object_CD4
+CD4_clust <- seurat$CD4_clust_annot
+
+cds <- SeuratWrappers::as.cell_data_set(seurat)
+fData(cds)$gene_short_name <- rownames(fData(cds)) # Requires short names
+
+recreate.partition <- c(rep(1,length(cds@colData@rownames)))
+names(recreate.partition) <- cds@colData@rownames
+recreate.partition <- as.factor(recreate.partition)
+
+# UMAP
+cds@clusters$UMAP$partitions <- recreate.partition
+cds@clusters$UMAP$clusters <- CD4_clust
+cds@int_colData@listData$reducedDims$UMAP<- seurat@reductions$umap_cd4_@cell.embeddings
+
+pData(cds)$sample_name <- as.factor(pData(cds)$sample_name)
+#pData(cds) <- NULL
+pData(cds)$sample_name <- NULL
+cds <- learn_graph(cds, use_partition = FALSE)
+plot_list <- plot_cells(cds,
+         color_cells_by = "cluster",
+         label_groups_by_cluster = FALSE,
+         label_branch_points = FALSE,
+         label_roots = TRUE,
+         label_leaves = FALSE,
+         group_label_size = 5)
+
+cds <- order_cells(cds, reduction_method = "UMAP", root_cells = colnames(cds)[cds@colData@listData[["CD4_clust"]] %in% c(0,1,2)]) 
+
+
+pseudotime_plot_list <- plot_cells(cds,
+         color_cells_by = "pseudotime",
+         label_groups_by_cluster = FALSE,
+         label_branch_points = FALSE,
+         label_roots = FALSE,
+         label_leaves = FALSE,
+         group_label_size = 5)
+
+#cds$monocle3_pseudotime <- pseudotime(cds
+  
+  
+  pseudotime_plot_list <- plot_cells(cds,
+           color_cells_by = "CD4_pseudotime",
+           label_groups_by_cluster = FALSE,
+           label_branch_points = FALSE,
+           label_roots = FALSE,
+           label_leaves = FALSE)
+
+  cds$monocle3_pseudotime <- pseudotime(cds)
+  
+  # Adding Metadata
+  colData(cds)$CD4_clust <- cds@clusters@listData[["UMAP"]][["clusters"]]
+  colData(cds)$CD4_clust_copy <- CD4_clust
+  #colData(cds)$Organ_Inf <- organ_inf
+  colData(cds)$Organ <- organ
+  data.pseudo <- as.data.frame(colData(cds))
+  
+  # Update the ident in Seurat object
+pseudotime_CD4 <- as.data.frame(cds@colData@listData[["CD4_pseudotime"]])
+colnames(pseudotime_CD4) <- c("CD4_pseudotime")
+pseudotime_CD4$barcodes <- rownames(pseudotime_CD4)
+
+merged_data <- merge(seurat_object_CD4@meta.data, pseudotime_CD4, by.x = "cell_barcode", by.y = "barcodes", all.x = TRUE)
+seurat_object_CD4$CD4_pseudotime <- merged_data$CD4_pseudotime.x
+
+
+  # Creating Final Plot
+  pseudotime_barplot_Cd4 <- ggplot(data.pseudo, aes(x = CD4_pseudotime, y = CD4_clust, fill = CD4_clust)) + geom_boxplot() + ggtitle("CD4 Clusters by Pseudotime") + theme(legend.position = "none")
+  
+  
+  library("RColorBrewer")
+  pseudotime_cd4_tsne <- FeaturePlot(seurat_object_CD4, feature = "CD4_pseudotime", reduction = "tsne_cd4_") + ggtitle("Pseudotime for CD4") + scale_colour_gradientn(colours = brewer.pal(n = 3, name = "YlOrRd"))
+  
+cd4_pseudo <- cowplot::plot_grid(pseudotime_cd4_tsne, pseudotime_barplot_Cd4, ncol = 2, rel_widths = c(1,0.8), labels = c("A", "B"))
+
+
+  #cd4_pseudo <- FeaturePlot_scCustom(seurat_object_CD4, feature = "CD4_pseudotime", reduction = "fa2_cd4_", cols = c("black", "grey","red", "orange", "yellow", "green", "blue"))
+  
+```
+
+
+# Genes Associated with Pseudotime
+
+```{r}
+
+var_features <- seurat_object_CD4@assays[["RNA"]]@var.features
+de_genes <- list()
+
+gene_fits <- fit_models(cds, model_formula_str = "~CD4_pseudotime")
+fit_coefs <- coefficient_table(gene_fits)
+  fit_coefs <- fit_coefs %>% filter(term == "monocle3_pseudotime")
+  pseudo_time_terms[[organ_inf]] %>% filter (q_value < 0.05) %>%
+         select(gene_short_name, term, q_value, estimate)
+
+for (i in seq(1:length(pseudotime_cds))){
+  organ_inf <- unique(pseudotime_cds[[i]]@colData$Organ_Inf)
+  organ <- unique(pseudotime_cds[[i]]@colData$Organ)
+  cds <- pseudotime_cds[[i]]
+  cds <- estimate_size_factors(cds)
+  print(organ_inf)
+  
+  # Morans 1 Analysis
+  de_genes[[organ_inf]] = graph_test(cds,
+                      neighbor_graph = "principal_graph")
+ 
+  # Model Fitting
+  cds_subset <- cds[rowData(cds)$gene_short_name %in% var_features,]
+  
+  gene_fits <- fit_models(cds_subset, model_formula_str = "~monocle3_pseudotime")
+  fit_coefs <- coefficient_table(gene_fits)
+  fit_coefs <- fit_coefs %>% filter(term == "monocle3_pseudotime")
+  pseudo_time_terms[[organ_inf]] %>% filter (q_value < 0.05) %>%
+         select(gene_short_name, term, q_value, estimate)
+   
+}
+```
+
+# Fit Model for Subset
+```{r}
+#cds_subset <- cds[colData(cds)$gene_short_name %in% ciliated_genes,]
+cds_subset <- cds[,colData(cds)$CD4_clust == "8"]
+gene_fits <- fit_models(cds_subset, model_formula_str = "~monocle3_pseudotime")
+```
+
+https://github.com/satijalab/seurat-wrappers/issues/54
+https://rnabioco.github.io/cellar/previous/2019/docs/5_trajectories.html
+
+Monocle3 - graph_test vs fit_models
+https://rdocumentation.org/packages/monocle3/versions/1.0.0/topics/graph_test
+
+# Il17 with Pseudotime
+```{r}
+pseudotime <- seurat_object.colon@meta.data[["pseudotime"]]
+gene_expression <- seurat_object.colon@assays[["RNA"]]@data["H2az1",]
+
+# Create a data frame for plotting
+plot_data <- data.frame(Pseudotime = pseudotime, GeneExpression = gene_expression)
+
+# Plot using ggplot2
+ggplot(plot_data, aes(x = Pseudotime, y = GeneExpression)) +
+  geom_point() +
+  labs(title = "Expression of Sgo2a against Pseudotime in the Colon",
+       x = "Pseudotime",
+       y = "Expression of Sgo2a")
+
+CD4_colors <- c("#373634", "#F7B6D2", "#F8EED1", "#14FFB1" ,paletteer_d("ggthemes::calc"))
+
+ggplot(seurat_object_CD4@meta.data, aes(x = CD4_pseudotime, y = Th17.gene.set.score, color = factor(CD4_clust))) + 
+  scale_fill_manual(values = CD4_colors) +
+  geom_point() +
+  labs(title = "Th17 Gene Set Score vs Pseudotime",
+       x = "Pseudotime",
+       y = "Th17 Gene Set Score") +
+  theme_minimal()
+```
+
+
+# Pseudotime on all CD8
+
+```{r}
+CD8_clust <- seurat_object_CD8$CD8_clust_annot
+seurat <- seurat_object_CD8
+CD8_clust <- seurat$CD8_clust_annot
+
+cds <- SeuratWrappers::as.cell_data_set(seurat)
+fData(cds)$gene_short_name <- rownames(fData(cds)) # Requires short names
+
+recreate.partition <- c(rep(1,length(cds@colData@rownames)))
+names(recreate.partition) <- cds@colData@rownames
+recreate.partition <- as.factor(recreate.partition)
+
+# UMAP
+cds@clusters$UMAP$partitions <- recreate.partition
+cds@clusters$UMAP$clusters <- CD8_clust
+cds@int_colData@listData$reducedDims$UMAP<- seurat@reductions$umap_cd8_@cell.embeddings
+
+pData(cds)$sample_name <- as.factor(pData(cds)$sample_name)
+#pData(cds) <- NULL
+pData(cds)$sample_name <- NULL
+cds <- learn_graph(cds, use_partition = FALSE)
+plot_list <- plot_cells(cds,
+         color_cells_by = "cluster",
+         label_groups_by_cluster = FALSE,
+         label_branch_points = FALSE,
+         label_roots = TRUE,
+         label_leaves = FALSE,
+         group_label_size = 5)
+
+cds <- order_cells(cds, reduction_method = "UMAP", root_cells = colnames(cds)[cds@colData@listData[["CD8_clust"]] %in% c(0,1,2)]) 
+
+
+pseudotime_plot_list <- plot_cells(cds,
+         color_cells_by = "pseudotime",
+         label_groups_by_cluster = FALSE,
+         label_branch_points = FALSE,
+         label_roots = FALSE,
+         label_leaves = FALSE,
+         group_label_size = 5)
+
+#cds$monocle3_pseudotime <- pseudotime(cds
+  
+  
+  pseudotime_plot_list <- plot_cells(cds,
+           color_cells_by = "CD8_pseudotime",
+           label_groups_by_cluster = FALSE,
+           label_branch_points = FALSE,
+           label_roots = FALSE,
+           label_leaves = FALSE)
+
+  cds$monocle3_pseudotime <- pseudotime(cds)
+  
+  # Adding Metadata
+  colData(cds)$CD8_clust <- cds@clusters@listData[["UMAP"]][["clusters"]]
+  colData(cds)$CD8_clust_copy <- CD8_clust
+  #colData(cds)$Organ_Inf <- organ_inf
+  colData(cds)$Organ <- organ
+  data.pseudo <- as.data.frame(colData(cds))
+  
+  # Update the ident in Seurat object
+pseudotime_CD8 <- as.data.frame(cds@colData@listData[["CD8_pseudotime"]])
+colnames(pseudotime_CD8) <- c("CD8_pseudotime")
+pseudotime_CD8$barcodes <- rownames(pseudotime_CD8)
+
+merged_data <- merge(seurat_object_CD8@meta.data, pseudotime_CD8, by.x = "cell_barcode", by.y = "barcodes", all.x = TRUE)
+seurat_object_CD8$CD8_pseudotime <- merged_data$CD8_pseudotime.x
+
+
+  # Creating Final Plot
+  pseudotime_barplot_Cd8 <- ggplot(data.pseudo, aes(x = CD8_pseudotime, y = CD8_clust, fill = CD8_clust)) + geom_boxplot() + ggtitle("CD8 Clusters by Pseudotime") + theme(legend.position = "none")
+  
+  
+  library("RColorBrewer")
+  pseudotime_cd8_tsne <- FeaturePlot(seurat_object_CD8, feature = "CD8_pseudotime", reduction = "tsne_cd8_") + ggtitle("Pseudotime for CD8") + scale_colour_gradientn(colours = brewer.pal(n = 3, name = "YlOrRd"))
+  
+cd8_pseudo <- cowplot::plot_grid(pseudotime_cd8_tsne, pseudotime_barplot_Cd8, ncol = 2, rel_widths = c(1,0.8), labels = c("A", "B"))
+
+
+  #cd4_pseudo <- FeaturePlot_scCustom(seurat_object_CD4, feature = "CD4_pseudotime", reduction = "fa2_cd4_", cols = c("black", "grey","red", "orange", "yellow", "green", "blue"))
+  
+```
+
+
+# SLINGSHOT 
+
+```{r}
+sce <- as.SingleCellExperiment(seurat_object_CD4, assay = "RNA")
+
+sce$CD4_clust
+
+cellLabels <- sce$CD4_clust
+migr <- counts(sce)
+colnames(migr) <- cellLabels
+
+sce <- scater::runPCA(sce,ncomponent = 5)
+
+set.seed(723451) # for reproducibility
+library(Polychrome)
+my_color <- createPalette(17, c("#010101", "#ff0000", "forestgreen"), M=1000)
+names(my_color) <- unique(as.character(sce$CD4_clust))
+
+pca_df <- data.frame(PC1 = reducedDim(sce,"PCA")[,1],
+                     PC2 = reducedDim(sce,"PCA")[,2],
+                     cell_type2 = sce$CD4_clust)
+
+ggplot(data = pca_df)+geom_point(mapping = aes(x = PC1, y = PC2, colour = cell_type2)) +
+  scale_colour_manual(values = my_color)+theme_classic()
+
+library(ggbeeswarm)
+ggplot(pca_df, aes(x = PC1, y = CD4_clust, 
+                              colour = CD4_clust)) +
+    geom_quasirandom(groupOnX = FALSE) +
+    scale_colour_manual(values = my_color) + theme_classic() +
+    xlab("First principal component") + ylab("Timepoint") +
+    ggtitle("Cells ordered by first principal component")
+```
+
+# Slingshot
+```{r}
+library(slingshot)
+sce <- as.SingleCellExperiment(seurat_object_CD4, assay = "RNA")
+cellLabels <- sce$CD4_clust
+sce.sling <- slingshot(sce, reducedDim='PCA', clusterLabels = cellLabels, approx_points=100)
+sce.sling3
+embedded <- embedCurves(sce.sling3, "TSNE")
+embedded <- slingCurves(embedded)
+embedded <- data.frame(embedded$s[embedded$ord,])
+
+shared.pseudo <- rowMeans(pseudo.paths3, na.rm=TRUE)
+
+
+gg <- plotTSNE(sce.sling3, colour_by=I(shared.pseudo))
+embedded <- embedCurves(sce.sling3, "TSNE")
+embedded <- slingCurves(embedded)
+for (path in embedded) {
+    embedded <- data.frame(path$s[path$ord,])
+    gg <- gg + geom_path(data=embedded, aes(x=tSNE_1, y=tSNE_2), size=1.2)
+}
+
+gg
+
+plotTSNE(sce.sling, colour_by="slingPseudotime_1") +
+    geom_path(data=embedded, aes(x=tSNE_1, y=tSNE_2), size=1.2)
+
+plotTSNE(sce.sling, colour_by="slingPseudotime_2") +
+    geom_path(data=embedded, aes(x=tSNE_1, y=tSNE_2), size=1.2)
+
+slingshot_df <- as.data.frame(colData(sce.sling)[,c("slingPseudotime_1","slingPseudotime_2", "CD4_clust")])
+
+ggplot(slingshot_df, aes(x = slingPseudotime_1, y = CD4_clust, 
+                              colour = CD4_clust)) +
+    geom_quasirandom(groupOnX = FALSE) + theme_classic() +
+    xlab("First Slingshot pseudotime") + ylab("cell type") +
+    ggtitle("Cells ordered by Slingshot pseudotime")+scale_colour_manual(values = my_color)
+```
+
+```{r}
+cd4_pseudo <- FeaturePlot_scCustom(seurat_object_CD4, feature = "CD4_pseudotime", reduction = "fa2_cd4_", cols = c("black", "grey","red", "orange", "yellow", "green", "blue"))
+
+cd8_pseudo
+
+DimPlot(seurat_object_CD4, reduction = "fa2_cd4_", group.by = "CD4_clust_annot", label = TRUE, label.box = TRUE, repel = TRUE)
+```
+
+
+```{r}
+library(slingshot)
+library(paletteer)
+
+sce <- slingshot(sce, clusterLabels = 'CD4_clust',reducedDim = "FA2_CD4_",
+                      allow.breaks = FALSE)
+
+lnes <- getLineages(reducedDim(sce,"FA2_CD4_"),
+                    sce$CD4_clust)
+
+my_color_annot <- createPalette(14, c("#010101", "#ff0000"), M=1000)
+
+plot(reducedDims(sce)$PCA, col = my_color_annot[as.factor(sce$CD4_clust_annot)], 
+     pch=16, 
+     asp = 1)
+legend("bottomleft",legend = names(my_color_annot[levels(sce$CD4_clust_annot)]),  
+       fill = my_color_annot[levels(sce$CD4_clust)])
+lines(SlingshotDataSet(sce), lwd=2, type = 'lineages', col = c("black"))
+```
+
+
+```{r}
+#library(scpcaTools)
+slingshot_df <- as.data.frame(colData(sce)[,c(32:42)])
+```
+
+```{r}
+library(gam)
+t <- sce$slingPseudotime_1
+
+# for time, only look at the 1000 most variable genes 
+Y <- log1p(assay(sce,"logcounts"))
+
+var100 <- names(sort(apply(Y,1,var),decreasing = TRUE))[1:1000]
+Y <- Y[var100,]
+
+# fit a GAM with a loess term for pseudotime
+gam.pval <- apply(Y,1,function(z){
+    d <- data.frame(z=z, t=t)
+    suppressWarnings({
+      tmp <- gam(z ~ lo(t), data=d)
+    })
+    p <- summary(tmp)[3][[1]][2,3]
+    p
+})
+
+## Plot the top 100 genes' expression 
+
+topgenes <- names(sort(gam.pval, decreasing = FALSE))[1:100]
+
+heatdata <- assays(sce)$logcounts[topgenes, order(t, na.last = NA)]
+heatclus <- sce$CD4_clust[order(t, na.last = NA)]
+
+heatmap(as.matrix(heatdata), Colv = NA,
+        ColSideColors = my_color[heatclus],cexRow = 1,cexCol = 1)
+```
+
+# SC VELO
+
+```{r}
+library(velociraptor)
+velo.out <- scvelo(sce)
+scvelo(list(X=spliced, spliced=spliced, unspliced=unspliced))
+spliced <- counts(sce, assay.X)
+
+embedded <- embedVelocity(reducedDim(sce, "UMAP_CD4_"), velo.out)
+grid.df <- gridVectors(sce, embedded, use.dimred = "UMAP_CD4_")
+
+
+```
+
+# Diffusion Map
+
+```{r}
+library(Seurat) 
+library(SingleCellExperiment)
+DefaultAssay(seurat_object_CD4) <- "RNA"
+sce <- as.SingleCellExperiment(seurat_object_CD4)
+#this has the cell classification
+table(sce$ident)
+cellLabels <- sce$ident
+
+library(destiny)
+dm <- DiffusionMap(sce, verbose = TRUE)
+
+cellLabels <- sce$ident
+tmp <- data.frame(DC1 = eigenvectors(dm)[, 1],
+                  DC2 = eigenvectors(dm)[, 2],
+                  DC3 = eigenvectors(dm)[, 3],
+                  DC4 = eigenvectors(dm)[, 4],
+                  Samples = cellLabels)
+ggplot(tmp, aes(x = DC1, y = DC2, colour = Samples)) +
+  geom_point()  + 
+  xlab("Diffusion component 1") + 
+  ylab("Diffusion component 2") +
+  theme_classic()
+
+```
+
+```{r}
+sce$pseud_dm1 <- rank(eigenvectors(dm)[,1])      # rank cells by their dpt dm1
+sce$pseud_dm2 <- rank(eigenvectors(dm)[,2])      # rank cells by their dpt dm2
+sce$pseud_dm1R <- rank(-eigenvectors(dm)[,1])    # rank cells by their dpt dm1 reverse order
+sce$pseud_dm2R <- rank(-eigenvectors(dm)[,2])    # rank cells by their dpt dm2 reverse order
+
+SortedDM1 <- data.frame(DM1Sort = as.data.frame(colData(sce))$pseud_dm1,
+                        Samples = as.data.frame(colData(sce))$ident)
+SortedDM2 <- data.frame(DM2Sort = as.data.frame(colData(sce))$pseud_dm2,
+                        Samples = as.data.frame(colData(sce))$ident)
+SortedDM1R <- data.frame(DM1SortR = as.data.frame(colData(sce))$pseud_dm1R,
+                         Samples = as.data.frame(colData(sce))$ident)
+SortedDM2R <- data.frame(DM2SortR = as.data.frame(colData(sce))$pseud_dm2R,
+                         Samples = as.data.frame(colData(sce))$ident)
+
+ggplot(SortedDM1, aes(x=SortedDM1[,1], y=Samples,color=Samples)) +
+  geom_jitter() + xlab("Diffusion component 1 (DC1)") + ylab("Samples") +
+  ggtitle("Cells ordered by DC1")
+ggplot(SortedDM2, aes(x=SortedDM2[,1], y=Samples,color=Samples)) +
+  geom_jitter() + xlab("Diffusion component 2 (DC2)") + ylab("Samples") +
+  ggtitle("Cells ordered by DC2")
+  
+ggplot(SortedDM1R, aes(x=SortedDM1R[,1], y=Samples,color=Samples)) +
+  geom_jitter() + xlab("Minus Diffusion component 1 (DC1)") + ylab("Samples") +
+  ggtitle("Cells ordered by reversed DC1")
+ggplot(SortedDM2R, aes(x=SortedDM2R[,1], y=Samples,color=Samples)) +
+  geom_jitter() + xlab("Minus Diffusion component 2 (DC2)") + ylab("Samples") +
+  ggtitle("Cells ordered by reversed DC2")
+```
+
+
+
+# Pseudotime on all Organ/Infection Combinations
+```
+organ_list <- unique(seurat_object_CD4$Organ)
+organ_inf_list <- unique(seurat_object_CD4$Inf_Organ)
+plot_list <- list()
+pseudotime_plot_list <- list()
+pseudotime_list <- list()
+pseudotime_cds <- list()
+
+for (cd in organ_inf_list){
+  seurat <- subset(x = seurat_object_CD4, subset = (Inf_Organ == organ_inf))
+  #seurat <- subset(x = seurat_object_CD4, subset = (Organ == organ))
+  seurat <- seurat_object_CD4
+  print(organ_inf)
+  organ <- unique(seurat$Organ)
+  CD4_clust <- seurat$CD4_clust
+  
+  cds <- SeuratWrappers::as.cell_data_set(seurat)
+  fData(cds)$gene_short_name <- rownames(fData(cds)) # Requires short names
+  
+  recreate.partition <- c(rep(1,length(cds@colData@rownames)))
+  names(recreate.partition) <- cds@colData@rownames
+  recreate.partition <- as.factor(recreate.partition)
+  
+  # UMAP
+  cds@clusters$UMAP$partitions <- recreate.partition
+  cds@clusters$UMAP$clusters <- CD4_clust
+  cds@int_colData@listData$reducedDims$UMAP<- seurat@reductions$umap_cd4_@cell.embeddings
+  
+  pData(cds)$sample_name <- as.factor(pData(cds)$sample_name)
+  pData(cds) <- NULL
+  cds <- learn_graph(cds, use_partition = FALSE)
+  plot_list[[organ_inf]] <- plot_cells(cds,
+           color_cells_by = "cluster",
+           label_groups_by_cluster = FALSE,
+           label_branch_points = FALSE,
+           label_roots = TRUE,
+           label_leaves = FALSE,
+           group_label_size = 5)
+
+  cds <- order_cells(cds, reduction_method = "UMAP", root_cells = cds@colData@rownames[cds@clusters@listData[["UMAP"]][["clusters"]] %in% c("0", "1", "2")]) 
+  
+  
+  pseudotime_plot_list[[organ_inf]] <- plot_cells(cds,
+           color_cells_by = "pseudotime",
+           label_groups_by_cluster = FALSE,
+           label_branch_points = FALSE,
+           label_roots = FALSE,
+           label_leaves = FALSE,
+           group_label_size = 5)
+
+  cds$monocle3_pseudotime <- pseudotime(cds)
+  
+  # Adding Metadata
+  colData(cds)$CD4_clust <- cds@clusters@listData[["UMAP"]][["clusters"]]
+  colData(cds)$CD4_clust_copy <- CD4_clust
+  colData(cds)$Organ_Inf <- organ_inf
+  colData(cds)$Organ <- organ
+  data.pseudo <- as.data.frame(colData(cds))
+  
+  # Creating Final Plot
+  pseudotime_list[[organ_inf]] <- ggplot(data.pseudo, aes(x = monocle3_pseudotime, y = CD4_clust, fill = CD4_clust)) + geom_boxplot() + ggtitle(paste0(organ_inf, " CD4 Clusters by Pseudotime"))
+  
+  pseudotime_cds[[organ_inf]] <- cds
+  
+}
+```
+
+
+Graph by Pseudotime
+Ordering by pseudotime - not sure what to make the root cells
+```
+pseudo_bar <- plot_grid(pseudotime_list[[5]] + NoLegend() + theme(axis.title.x=element_blank()), pseudotime_list[[2]] + NoLegend() + theme(axis.title.x=element_blank(), axis.title.y=element_blank()), pseudotime_list[[1]] + NoLegend() + theme(axis.title.x=element_blank()), pseudotime_list[[6]] + NoLegend() + theme(axis.title.x=element_blank(), axis.title.y=element_blank()), pseudotime_list[[3]] + NoLegend(), pseudotime_list[[4]] + NoLegend() + theme(axis.title.y=element_blank()), ncol = 2)
+```
+
+```
+pseudo_umap <- plot_grid((plot_cells(pseudotime_cds[[5]],
+           color_cells_by = "monocle3_pseudotime",
+           label_cell_groups = FALSE,
+           label_leaves = FALSE,
+           label_branch_points = FALSE,
+           label_roots = FALSE,
+           graph_label_size = 1.5)) + ggtitle("Colon Infected Cell Trajectory"),
+          
+          (plot_cells(pseudotime_cds[[2]],
+           color_cells_by = "monocle3_pseudotime",
+           label_cell_groups = FALSE,
+           label_leaves = FALSE,
+           label_branch_points = FALSE,
+           label_roots = FALSE,
+           graph_label_size = 1.5)) + ggtitle("Colon Non-infected Cell Trajectory"),
+          
+          (plot_cells(pseudotime_cds[[1]],
+           color_cells_by = "monocle3_pseudotime",
+           label_cell_groups = FALSE,
+           label_leaves = FALSE,
+           label_branch_points = FALSE,
+           label_roots = FALSE,
+           graph_label_size = 1.5)) + ggtitle("Lung Infected Cell Trajectory"),
+          
+          (plot_cells(pseudotime_cds[[6]],
+           color_cells_by = "monocle3_pseudotime",
+           label_cell_groups = FALSE,
+           label_leaves = FALSE,
+           label_branch_points = FALSE,
+           label_roots = FALSE,
+           graph_label_size = 1.5)) + ggtitle("Lung Non-infected Cell Trajectory"),
+          
+          (plot_cells(pseudotime_cds[[3]],
+           color_cells_by = "monocle3_pseudotime",
+           label_cell_groups = FALSE,
+           label_leaves = FALSE,
+           label_branch_points = FALSE,
+           label_roots = FALSE,
+           graph_label_size = 1.5)) + ggtitle("mLns Infected Cell Trajectory"),
+          
+          (plot_cells(pseudotime_cds[[4]],
+           color_cells_by = "monocle3_pseudotime",
+           label_cell_groups = TRUE,
+           label_leaves = FALSE,
+           label_branch_points = TRUE,
+           label_roots = FALSE,
+           graph_label_size = 1.5)) + ggtitle("mLns Non-infected Cell Trajectory"),
+          
+          ncol = 2)
+```
+
+Comparing the distribution of psuedotime for each cluster and organ
+```
+ca_colon_data <- pseudotime_cds[[5]]@colData
+no_colon_data <- pseudotime_cds[[2]]@colData
+
+wilcox_clust_colon <- list()
+wilcox_clust_colon_pval <- list()
+
+ca_lung_data <- pseudotime_cds[[1]]@colData
+no_lung_data <- pseudotime_cds[[6]]@colData
+
+wilcox_clust_lung <- list()
+wilcox_clust_lung_pval <- list()
+
+ca_mlns_data <- pseudotime_cds[[3]]@colData
+no_mlns_data <- pseudotime_cds[[4]]@colData
+
+wilcox_clust_mlns <- list()
+wilcox_clust_mlns_pval <- list()
+
+
+for (clust in seq(0:15)-1) {
+  print(clust)
+  clust_name <- paste0("Cluster ", clust)
+  
+  # For Colon
+  ca_colon_dist <- ca_colon_data$monocle3_pseudotime[ca_colon_data$CD4_clust == clust]
+  no_colon_dist <- no_colon_data$monocle3_pseudotime[no_colon_data$CD4_clust == clust]
+  
+  wilcox_result <- tryCatch(
+    wilcox.test(ca_colon_dist, no_colon_dist),
+    error = function(e) {
+      cat("Error occurred for cluster", clust_name, ": ", conditionMessage(e), "\n")
+      wilcox_result <- list(statistic = NA, p.value = NA)
+      return(wilcox_result)
+    },
+    warning = function(w) {
+      cat("Warning occurred for cluster", clust_name, ": ", conditionMessage(w), "\n")
+      wilcox_result <- list(statistic = NA, p.value = NA)
+      return(wilcox_result)
+    }
+  )
+  
+  wilcox_clust_colon[[clust_name]] <- wilcox_result
+  wilcox_clust_colon_pval[[clust_name]] <- wilcox_result$p.value
+  
+  # For Lung
+  ca_lung_dist <- ca_lung_data$monocle3_pseudotime[ca_lung_data$CD4_clust == clust]
+  no_lung_dist <- no_lung_data$monocle3_pseudotime[no_lung_data$CD4_clust == clust]
+  
+  wilcox_result <- tryCatch(
+    wilcox.test(ca_lung_dist, no_lung_dist),
+    error = function(e) {
+      cat("Error occurred for cluster", clust_name, ": ", conditionMessage(e), "\n")
+      wilcox_result <- list(statistic = NA, p.value = NA)
+      return(wilcox_result)
+    },
+    warning = function(w) {
+      cat("Warning occurred for cluster", clust_name, ": ", conditionMessage(w), "\n")
+      wilcox_result <- list(statistic = NA, p.value = NA)
+      return(wilcox_result)
+    }
+  )
+  
+  wilcox_clust_lung[[clust_name]] <- wilcox_result
+  wilcox_clust_lung_pval[[clust_name]] <- wilcox_result$p.value
+  
+  # For mlns
+  ca_mlns_dist <- ca_mlns_data$monocle3_pseudotime[ca_mlns_data$CD4_clust == clust]
+  no_mlns_dist <- no_mlns_data$monocle3_pseudotime[no_mlns_data$CD4_clust == clust]
+  
+  wilcox_result <- tryCatch(
+    wilcox.test(ca_mlns_dist, no_mlns_dist),
+    error = function(e) {
+      cat("Error occurred for cluster", clust_name, ": ", conditionMessage(e), "\n")
+      wilcox_result <- list(statistic = NA, p.value = NA)
+      return(wilcox_result)
+    },
+    warning = function(w) {
+      cat("Warning occurred for cluster", clust_name, ": ", conditionMessage(w), "\n")
+      wilcox_result <- list(statistic = NA, p.value = NA)
+      return(wilcox_result)
+    }
+  )
+  
+  wilcox_clust_mlns[[clust_name]] <- wilcox_result
+  wilcox_clust_mlns_pval[[clust_name]] <- wilcox_result$p.value
+  
+}
+```
+
+```
+pseudotime_pval <- rbind(wilcox_clust_colon_pval, wilcox_clust_lung_pval, wilcox_clust_mlns_pval)
+rownames(pseudotime_pval) <- c("Colon", "Lung", "mLns")
+
+```

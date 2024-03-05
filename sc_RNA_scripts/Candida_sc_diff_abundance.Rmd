@@ -1,0 +1,658 @@
+---
+title: "Candida_sc_diff_abundance"
+author: "Nathan Morris"
+date: "2024-01-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = getwd())
+```
+
+### Data Import
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+# Data Import
+library(Seurat)
+library(scater)
+library(dplyr)
+library(SingleR)
+library(celldex)
+library(scRNAseq)
+library(scran)
+library(gridExtra)
+library(pheatmap)
+library(ess)
+library(reshape2)
+library(ggpubr)
+library(scCustomize)
+library(gridExtra)
+library(monocle3)
+library(ggpattern)
+library(ggplot2)
+library(ggalluvial)
+library(tidyr)
+
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+```
+
+```
+seurat_object <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT_new_metadata.Rds"))
+seurat_object <- readRDS(file = paste0(data_dir, "/dataset_w_annot.rds"))
+```
+
+# Differential Abundance Proptest Function
+
+```{r, warning = FALSE}
+cluster_differences <- function(cluster_name, seurat_object){
+  
+  seurat_object.colon <- subset(x = seurat_object, subset = (Organ == "Colon"))
+  seurat_object.lung <- subset(x = seurat_object, subset = (Organ == "Lung"))
+  seurat_object.mlns <- subset(x = seurat_object, subset = (Organ == "mLns"))
+  
+  Idents(seurat_object.colon) <- cluster_name
+  Idents(seurat_object.mlns) <- cluster_name
+  Idents(seurat_object.lung) <- cluster_name
+  
+  organs <- c("Colon", "Lung", "mLns")
+  
+  df_organ <- c()
+  df_cluster <- c()
+  df_NT_inClust <- c()
+  df_CA_inClust <- c()
+  df_NT_total <- c()
+  df_CA_total <- c()
+  df_pcNT <- c()
+  df_pcCA <- c()
+  df_pval <- c()
+  
+  n <- 1
+  
+  RNA_organ <- c(seurat_object.colon, seurat_object.lung, seurat_object.mlns)
+  cluster_name <- as.character(cluster_name)
+  
+  for (seurat_object.sub in RNA_organ) {
+    
+    organ <- as.character(unique(seurat_object.sub$Organ))
+    clusters = sort(unique(seurat_object.sub[[cluster_name]][[1]]))
+    
+    for (clust in clusters) {
+  
+      NTc <- nrow(seurat_object.sub@meta.data[seurat_object.sub[[cluster_name]][[1]] == clust & seurat_object.sub@meta.data$Infection == "No", ])
+      # NTc is the number of no Candida from an organ in a particular individual cluster
+      CAc <- nrow(seurat_object.sub@meta.data[seurat_object.sub[[cluster_name]][[1]] == clust & seurat_object.sub@meta.data$Infection == "Ca", ])
+      # CAc is the number of Candida from an organ in a particular individual cluster
+      
+      NT <- nrow(seurat_object.sub@meta.data[seurat_object.sub@meta.data$Infection == "No", ])
+      # Total amount of No infection from the organ
+      CA <- nrow(seurat_object.sub@meta.data[seurat_object.sub@meta.data$Infection == "Ca", ])
+      # Total amount of Ca infection from the organ
+      
+      successes <- c(NTc, CAc)
+      trials <- c(NT, CA)
+      
+      result <- tryCatch({
+    res <- prop.test(x = successes, n = trials)
+      }, warning = function(w) {
+    # Code to handle warnings
+    warningCondition <- conditionMessage(w)
+    cat("Warning:", warningCondition, "\n")
+      })
+      # Prop test to test the differences between the number of No/Ca in that cluster
+      # Versus the total number of those samples from the organ
+      
+      df_organ[n] <- organ
+      df_cluster[n] <- clust
+      df_NT_inClust[n] <- NTc
+      df_CA_inClust[n] <- CAc
+      df_NT_total[n] <- NT
+      df_CA_total[n] <- CA
+      df_pcNT[n] <- NTc/NT
+      df_pcCA[n] <- CAc/CA
+      df_pval[n] <- res$p.value
+      
+      n <- n + 1
+    }
+  }  
+  df <- data.frame(Organ = df_organ, Cluster = df_cluster, NT_clust = df_NT_inClust, CA_clust = df_CA_inClust, NT_total = df_NT_total, CA_total = df_CA_total, NT_Proportion = df_pcNT, CA_Proportion = df_pcCA, p_value = df_pval)
+  df$adj_p_value <- p.adjust(df$p_value, method = "bonferroni")
+  return(df)
+}
+```
+
+
+# CD4 Clusters ONLY
+```{r}
+seurat_object_CD4 <- readRDS(file = paste0(data_dir, "/CD4_data/seurat_object_CD4.rds"))
+```
+
+```{r}
+df_CD4 <- cluster_differences('CD4_clust', seurat_object_CD4)
+```
+
+
+Create df.long
+```{r}
+#df.long <- melt(df, id.vars=c("Organ", "Cluster"))
+df.long <- df_CD4 %>%
+  pivot_longer(cols = c(NT_Proportion, CA_Proportion),
+               names_to = "Proportion_Type",
+               values_to = "Proportion_Value")
+
+#df.long$Cluster_ordered <- factor(df.long$Cluster, levels=c('0','1','2','3','4','5','6','7','8','9','10','11','12')) 
+
+df.long$Significance <- ifelse(df.long$adj_p_value < 0.05, "Sig", "Not_Sig")
+
+df.long <- df.long %>%
+  group_by(Organ, Cluster) %>%
+  mutate(Max_Proportion = max(Proportion_Value))
+
+#ggplot(df.long, aes(x = Proportion_Type, y = Proportion_Value, fill = Organ)) +
+#  geom_bar(stat = "identity", position = "dodge") +
+#  facet_wrap(~Cluster, scales = "free_y") +
+#  labs(x = "Cluster", y = "Proportion")
+
+#my_comparisons <- list(c("NT_Proportion", "CA_Proportion"))
+```
+
+```{r}
+# Assuming 'df' is your dataframe
+# Convert Cluster and Organ to factors to control the order on the plot
+
+df_organ_clust <- as.data.frame(table(seurat_object_CD4$Organ, seurat_object_CD4$Infection, seurat_object_CD4$CD4_clust))
+
+colnames(df_organ_clust) <- c("Organ", "Infection", "Cluster", "Freq")
+
+df_organ_clust$Cluster <- factor(df_organ_clust$Cluster)
+df_organ_clust$Organ <- factor(df_organ_clust$Organ)
+
+df_organ_clust <- df_organ_clust %>%
+  group_by(Cluster, Infection) %>%
+  mutate(Clust_Proportion = Freq / sum(Freq))
+
+df_organ_clust <- df_organ_clust %>%
+  group_by(Organ, Infection) %>%
+  mutate(Organ_Proportion = Freq / sum(Freq))
+
+df_organ_clust$Organ_Infection <- paste0(df_organ_clust$Organ, " ", df_organ_clust$Infection)
+
+df_organ_clust$Clust_Infection <- paste0(df_organ_clust$Cluster, " ", df_organ_clust$Infection)
+
+df_organ_clust$Clust_Infection <- factor(df_organ_clust$Clust_Infection)
+# levels here
+```
+
+Created merged df
+```{r}
+#Merge to get the p-values
+merged_df <- left_join(df_organ_clust, df_CD4, by = c("Organ", "Cluster"))
+merged_df$Significance <- ifelse(merged_df$adj_p_value < 0.05, "Sig", "Not_Sig")
+merged_df$"P-value" <- ifelse(merged_df$adj_p_value < 0.05, "p-val < 0.05", "p-val > 0.05")
+merged_df$Cluster <- factor(merged_df$Cluster)
+merged_df$Cluster_ordered <- factor(merged_df$Cluster) 
+```
+
+# Fig 8 Part 1
+```{r}
+annot_df <- df_CD4
+annot_df <- annot_df[,c("Organ", "Cluster", "NT_clust","CA_clust","NT_Proportion", "CA_Proportion", "adj_p_value")]
+colnames(annot_df) <- c("Organ", "Cluster_ordered","NT_clust","CA_clust","NT_Proportion", "CA_Proportion", "adj_p_value")
+annot_df$Organ_cell_count <- annot_df$NT_clust + annot_df$CA_clust
+annot_df$start = c("No")
+annot_df$end = c("Ca")
+annot_df <- mutate(annot_df,
+                   label = case_when(
+                     adj_p_value < 0.01 ~ '***',
+                     adj_p_value < 0.05 ~ '**',
+                     adj_p_value < 0.1  ~ '*',
+                     TRUE               ~ ''
+                   )
+)
+annot_df <- mutate(annot_df,
+                   y = 0.03 + pmax(NT_Proportion, CA_Proportion)
+)
+annot_df_cells <- annot_df[annot_df$Organ_cell_count >= 25,]
+annot_df_sig <- annot_df_cells[annot_df_cells$adj_p_value < 0.1,]
+
+merged_df_sig <- merged_df[merged_df$Cluster %in% annot_df_sig$Cluster_ordered,]
+merged_df_sig$Cluster_ordered <- factor(merged_df_sig$Cluster_ordered, levels = sort(unique(as.numeric(as.character(merged_df_sig$Cluster)))))
+
+final_abundance_graph_cd4 <- ggplot(merged_df_sig) +
+    geom_bar(aes(x = Infection, y = Organ_Proportion, fill = Infection), colour = "black", stat = "identity", position = position_dodge(width = 1)) + geom_signif(data = annot_df_sig,
+aes(xmin = start, xmax = end, annotations = label, y_position = y), textsize = 3, vjust = -0.2, manual = TRUE) +
+    facet_grid(cols = vars(Cluster_ordered), rows = vars(Organ), scales = "free_y", space = "fixed") +
+    labs(x = "CD4 Cluster", y = "Proportion of Organ in Cluster") +
+    scale_x_discrete(position = "top") +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1))) +
+    theme(axis.text.x=element_blank(),
+          axis.ticks.x=element_blank(), legend.position = "top", strip.text.y.right = element_text(angle = 0)) +
+    guides(y.sec = guide_none("Organ"))
+
+merged_df_sig <-  merged_df_sig %>%
+  mutate(Clust_annot = case_when(
+    Cluster == "3" ~ "Naive CD4+ Colon",
+    Cluster == "4" ~ "Naive CD4+ Colon/Lung",
+    Cluster == "6" ~ "Th17 CD4",
+    Cluster == "15" ~ "Prolif CD4+ Lung",
+    TRUE ~ as.character(Cluster)  # Keep other values unchanged
+  ))
+
+annot_df_sig <-  annot_df_sig %>%
+  mutate(Clust_annot = case_when(
+    Cluster_ordered == "3" ~ "Naive CD4+ Colon",
+    Cluster_ordered == "4" ~ "Naive CD4+ Colon/Lung",
+    Cluster_ordered == "6" ~ "Th17 CD4",
+    Cluster_ordered == "15" ~ "Prolif CD4+ Lung",
+    TRUE ~ as.character(Cluster_ordered)  # Keep other values unchanged
+  ))
+
+final_abundance_graph_cd4_annot <- ggplot(merged_df_sig) +
+    geom_bar(aes(x = Infection, y = Organ_Proportion, fill = Infection), colour = "black", stat = "identity", position = position_dodge(width = 1)) + geom_signif(data = annot_df_sig,
+aes(xmin = start, xmax = end, annotations = label, y_position = y), textsize = 3, vjust = -0.2, manual = TRUE) +
+    facet_grid(cols = vars(Clust_annot), rows = vars(Organ), scales = "free_y", space = "fixed") +
+    labs(x = "CD4 Cluster", y = "Proportion of Organ in Cluster") +
+    scale_x_discrete(position = "top") +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
+  theme_bw()+
+    theme(axis.text.x=element_blank(),
+          axis.ticks.x=element_blank(), legend.position = "top", legend.title = element_text(size = 10),legend.text = element_text(size = 10), strip.text.y.right = element_text(angle = 0)) +
+    guides(y.sec = guide_none("Organ"))
+```
+
+
+```{r}
+supplementary_abundance_graph_cd4 <- ggplot(merged_df) +
+    geom_bar(aes(x = Infection, y = Organ_Proportion, fill = Infection), colour = "black", stat = "identity", position = position_dodge(width = 1)) + geom_signif(data = annot_df_sig,
+aes(xmin = start, xmax = end, annotations = label, y_position = y), textsize = 3, vjust = -0.2, manual = TRUE) +
+    facet_grid(cols = vars(Cluster_ordered), rows = vars(Organ), scales = "free_y", space = "fixed") +
+    labs(x = "CD4 Cluster", y = "Proportion of Organ in Cluster") +
+    scale_x_discrete(position = "top") +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1))) +
+    theme(axis.text.x=element_blank(),
+          axis.ticks.x=element_blank(), legend.position = "top", strip.text.y.right = element_text(angle = 0)) +
+    guides(y.sec = guide_none("Organ"))
+```
+
+# Fig 8 Part 2
+```{r}
+
+CD4_colors <- c("#373634", "#F7B6D2", "#F8EED1", "#14FFB1", "purple" ,paletteer_d("ggthemes::calc"))
+CD4_colors_annot <- CD4_colors[c(1,2, 4:17)]
+CD4_colors_sig <- c("grey", "grey", "#14FFB1", "purple", "grey", "#FF420EFF", "grey", "grey", "grey", "grey", "grey", "grey", "grey", "grey", "grey", "grey")
+CD4_colors_sig2 <- c("#14FFB1", "purple", "lightblue","#C5000BFF", "grey")
+
+
+seurat_object_CD4$CD4_clust_annot_abund_sig <- as.character(seurat_object_CD4$CD4_clust_annot)
+seurat_object_CD4$CD4_clust_annot_abund_sig[!(seurat_object_CD4$CD4_clust_annot_abund_sig %in% unique(merged_df_sig$Clust_annot))] <- "No Abundance Change"
+seurat_object_CD4$CD4_clust_annot_abund_sig <- factor(seurat_object_CD4$CD4_clust_annot_abund_sig, levels = c("Naive CD4+ Colon", "Naive CD4+ Colon/Lung","Prolif CD4+ Lung", "Th17 CD4", "No Abundance Change"))
+
+
+# Colon
+cd4_plot_annot_split_colon_inf <- DimPlot(seurat_object_CD4[,seurat_object_CD4$Organ == "Colon" & seurat_object_CD4$Infection == "Ca"], reduction = "tsne_cd4_", group.by = "CD4_clust_annot_abund_sig", cols = CD4_colors_sig2, pt.size = 1) + ggtitle("Candida Colonized") + theme(plot.title = element_text(size = 10, face = "plain")) + NoLegend()
+cd4_plot_annot_split_colon_noinf <- DimPlot(seurat_object_CD4[,seurat_object_CD4$Organ == "Colon" & seurat_object_CD4$Infection == "No"], reduction = "tsne_cd4_", group.by = "CD4_clust_annot_abund_sig", cols = CD4_colors_sig2, pt.size = 1) + ggtitle("No Infection") + theme(plot.title = element_text(size = 10, face = "plain")) + NoLegend()
+title <- ggplot() + theme_void() + ggtitle("         Colon cells by Infection")
+cd4_colon_inf <- cowplot::plot_grid(cd4_plot_annot_split_colon_inf, cd4_plot_annot_split_colon_noinf, ncol = 2)
+cd4_colon_inf_title <- cowplot::plot_grid(title, cd4_colon_inf, ncol =1, rel_heights = c(0.1, 1))
+
+# Lung
+cd4_plot_annot_split_lung_inf <- DimPlot(seurat_object_CD4[,seurat_object_CD4$Organ == "Lung" & seurat_object_CD4$Infection == "Ca"], reduction = "tsne_cd4_", group.by = "CD4_clust_annot_abund_sig", cols = CD4_colors_sig2, pt.size = 1) + ggtitle("Candida Colonized") + theme(plot.title = element_text(size = 10, face = "plain")) + NoLegend()
+cd4_plot_annot_split_lung_noinf <- DimPlot(seurat_object_CD4[,seurat_object_CD4$Organ == "Lung" & seurat_object_CD4$Infection == "No"], reduction = "tsne_cd4_", group.by = "CD4_clust_annot_abund_sig", cols = CD4_colors_sig2, pt.size = 1) + ggtitle("No Infection") + theme(plot.title = element_text(size = 10, face = "plain")) + NoLegend()
+title <- ggplot() + theme_void() + ggtitle("         Lung cells by Infection")
+cd4_lung_inf <- cowplot::plot_grid(cd4_plot_annot_split_lung_inf, cd4_plot_annot_split_lung_noinf, ncol = 2)
+cd4_lung_inf_title <- cowplot::plot_grid(title, cd4_lung_inf, ncol =1, rel_heights = c(0.1, 1))
+
+# mLns
+CD4_colors_sig2_mlns <- c("purple", "lightblue","#C5000BFF", "grey")
+
+cd4_plot_annot_split_mlns_inf <- DimPlot(seurat_object_CD4[,seurat_object_CD4$Organ == "mLns" & seurat_object_CD4$Infection == "Ca"], reduction = "tsne_cd4_", group.by = "CD4_clust_annot_abund_sig", cols = CD4_colors_sig2_mlns, pt.size = 1) + ggtitle("Candida Colonized") + theme(plot.title = element_text(size = 10, face = "plain")) + NoLegend()
+cd4_plot_annot_split_mlns_noinf <- DimPlot(seurat_object_CD4[,seurat_object_CD4$Organ == "mLns" & seurat_object_CD4$Infection == "No"], reduction = "tsne_cd4_", group.by = "CD4_clust_annot_abund_sig", cols = CD4_colors_sig2_mlns, pt.size = 1) + ggtitle("No Infection") + theme(plot.title = element_text(size = 10, face = "plain")) + NoLegend()
+title <- ggplot() + theme_void() + ggtitle("         mLns cells by Infection")
+cd4_mlns_inf <- cowplot::plot_grid(cd4_plot_annot_split_mlns_inf, cd4_plot_annot_split_mlns_noinf, ncol = 2)
+cd4_mlns_inf_title <- cowplot::plot_grid(title, cd4_mlns_inf, ncol =1, rel_heights = c(0.1, 1))
+
+# Legend
+legend <- cowplot::get_legend(DimPlot(seurat_object_CD4[,seurat_object_CD4$Organ == "Colon" & seurat_object_CD4$Infection == "Ca"], reduction = "tsne_cd4_", group.by = "CD4_clust_annot_abund_sig", cols = CD4_colors_sig2, pt.size = 1) + ggtitle("Candida Colonized") + theme(plot.title = element_text(size = 10, face = "plain"), legend.position = "top", legend.text = element_text(size = 10)))
+
+title <- ggplot() + theme_void() + ggtitle("            CD4+ Cells by Infection State in each Organ") + theme(plot.title = element_text(size = 14, face = "bold"))
+organ_inf_tsne <- cowplot::plot_grid(cd4_colon_inf_title, cd4_lung_inf_title, cd4_mlns_inf_title, ncol = 1, labels = c("A", "B", "C"), rel_heights = c(1, 1, 1))
+organ_inf_tsne_w_title_legend <- cowplot::plot_grid(title, legend, organ_inf_tsne, ncol = 1, rel_heights = c(0.05, 0.05, 1))
+abundance_figure_cd4 <- cowplot::plot_grid(organ_inf_tsne_w_title_legend, final_abundance_graph_cd4_annot, ncol = 2, labels = c("", "D"), rel_widths = c(0.4, 0.6))
+```
+
+Save merged_df for CD4
+```{r}
+merged_df_CD4 <- merged_df
+annot_df_sig_CD4 <- annot_df_sig
+```
+
+```{r}
+fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
+
+ggsave(filename = paste0(fig_directory, "figure_8.pdf"), plot = abundance_figure_cd4, device = "pdf", height = 14, width = 20)
+
+ggsave(filename = paste0(fig_directory, "figure_8.jpeg"), plot = abundance_figure_cd4, device = "jpeg", height = 14, width = 20)
+```
+
+
+# Figure 8 for presentation
+
+```
+seurat_object_CD4$Infection_new <- seurat_object_CD4$Infection
+seurat_object_CD4$Infection_new <- as.factor(seurat_object_CD4$Infection_new, levels = c("No Infection", "Candida Colonization"))
+
+DimPlot(seurat_object_CD4[,seurat_object_CD4$Organ == "Colon"], group.by = "CD4_clust", split.by = "Infection", reduction = "tsne_cd4_", cols = CD4_colors, pt.size = 1) + ggtitle("CD4 Clusters in the Colon by Infection Status")
+
+DimPlot(seurat_object_CD4[,seurat_object_CD4$Organ == "Lung"], group.by = "CD4_clust", split.by = "Infection", reduction = "tsne_cd4_", cols = CD4_colors, pt.size = 1) + ggtitle("CD4 Clusters in the Lung by Infection Status")
+
+DimPlot(seurat_object_CD8[,seurat_object_CD8$Organ == "Colon"], group.by = "CD8_clust", reduction = "tsne_cd8_", pt.size = 1, cols = CD8_colors, split.by = "Infection") + ggtitle("CD8 Clusters in the Colon by Infection Status")
+
+DimPlot(seurat_object_CD8[,seurat_object_CD8$Organ == "Lung"], group.by = "CD8_clust", reduction = "tsne_cd8_", pt.size = 1, cols = CD8_colors, split.by = "Infection") + ggtitle("CD8 Clusters in the Lung by Infection Status")
+
+```
+
+
+# DENSITY PLOT
+
+```{r}
+library(cetcolor)
+
+tsne_data_noinf <- as.data.frame(seurat_object_CD4[,seurat_object_CD4$Infection == "No"]@reductions$tsne_cd4_@cell.embeddings)
+tsne_data_inf <- as.data.frame(seurat_object_CD4[,seurat_object_CD4$Infection == "Ca"]@reductions$tsne_cd4_@cell.embeddings)
+
+# custom color scale
+ggplot(tsne_data_inf, aes(x = tSNE_1, y = tSNE_2)) + stat_density_2d(aes(fill = ..level..), geom = "polygon")
+
+ggplot(tsne_data_noinf, aes(x = tSNE_1, y = tSNE_2)) +   stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) + scale_x_continuous(expand = c(0, 0)) + scale_y_continuous(expand = c(0, 0))
+```
+
+
+# 7. CD8 Clusters ONLY
+```{r}
+seurat_object_CD8 <- readRDS(file = paste0(data_dir, "/CD8_data/seurat_object_CD8.rds"))
+```
+
+```{r}
+df_CD8 <- cluster_differences('CD8_clust', seurat_object_CD8)
+```
+
+Create df.long
+```{r}
+#library(reshape2)
+#df.long <- melt(df, id.vars=c("Organ", "Cluster"))
+library(tidyr)
+df.long <- df_CD8 %>%
+  pivot_longer(cols = c(NT_Proportion, CA_Proportion),
+               names_to = "Proportion_Type",
+               values_to = "Proportion_Value")
+
+df.long$Cluster_ordered <- factor(df.long$Cluster, levels=c('0','1','2','3','4','5','6','7','8','9')) 
+
+df.long$Significance <- ifelse(df.long$adj_p_value < 0.05, "Sig", "Not_Sig")
+
+df.long <- df.long %>%
+  group_by(Organ, Cluster) %>%
+  mutate(Max_Proportion = max(Proportion_Value))
+```
+
+```{r}
+df_organ_clust <- as.data.frame(table(seurat_object_CD8$Organ, seurat_object_CD8$Infection, seurat_object_CD8$CD8_clust))
+
+colnames(df_organ_clust) <- c("Organ", "Infection", "Cluster", "Freq")
+
+# Assuming 'df' is your dataframe
+# Convert Cluster and Organ to factors to control the order on the plot
+df_organ_clust$Cluster <- factor(df_organ_clust$Cluster)
+df_organ_clust$Organ <- factor(df_organ_clust$Organ)
+
+df_organ_clust <- df_organ_clust %>%
+  group_by(Cluster, Infection) %>%
+  mutate(Clust_Proportion = Freq / sum(Freq))
+
+df_organ_clust <- df_organ_clust %>%
+  group_by(Organ, Infection) %>%
+  mutate(Organ_Proportion = Freq / sum(Freq))
+
+df_organ_clust$Organ_Infection <- paste0(df_organ_clust$Organ, " ", df_organ_clust$Infection)
+
+df_organ_clust$Clust_Infection <- paste0(df_organ_clust$Cluster, " ", df_organ_clust$Infection)
+
+#df_organ_clust$Clust_Infection <- factor(df_organ_clust$Clust_Infection, levels = rev(c("0 Ca", "0 No", "1 Ca", "1 No", "2 Ca", "2 No", "3 Ca", "3 No", "4 Ca", "4 No", "5 Ca", "5 No", "6 Ca", "6 No", "7 Ca", "7 No", "8 Ca", "8 No", "9 Ca", "9 No", "10 Ca", "10 No", "11 Ca", "11 No", "12 Ca", "12 No")))
+```
+
+Create merged_df
+```{r}
+#Merge to get the p-values
+merged_df <- left_join(df_organ_clust, df_CD8, by = c("Organ", "Cluster"))
+merged_df$Significance <- ifelse(merged_df$adj_p_value < 0.05, "Sig", "Not_Sig")
+merged_df$"P-value" <- ifelse(merged_df$adj_p_value < 0.05, "p-val < 0.05", "p-val > 0.05")
+merged_df$Cluster <- factor(merged_df$Cluster, levels = c("0", "1", "2", "3", "4", "5", "6", "7", "8", "9"))
+merged_df$Cluster_ordered <- factor(merged_df$Cluster, levels=c('0','1','2','3','4','5','6','7','8','9')) 
+```
+
+# Fig 9 Part 1
+```{r}
+annot_df <- df_CD8
+annot_df <- annot_df[,c("Organ", "Cluster", "NT_clust","CA_clust","NT_Proportion", "CA_Proportion", "adj_p_value")]
+colnames(annot_df) <- c("Organ", "Cluster_ordered","NT_clust","CA_clust","NT_Proportion", "CA_Proportion", "adj_p_value")
+annot_df$Organ_cell_count <- annot_df$NT_clust + annot_df$CA_clust
+annot_df$start = c("No")
+annot_df$end = c("Ca")
+annot_df <- mutate(annot_df,
+                   label = case_when(
+                     adj_p_value < 0.01 ~ '***',
+                     adj_p_value < 0.05 ~ '**',
+                     adj_p_value < 0.1  ~ '*',
+                     TRUE               ~ ''
+                   )
+)
+annot_df <- mutate(annot_df,
+                   y = 0.03 + pmax(NT_Proportion, CA_Proportion)
+)
+annot_df_cells <- annot_df[annot_df$Organ_cell_count >= 25,]
+annot_df_sig <- annot_df_cells[annot_df_cells$adj_p_value < 0.1,]
+
+merged_df_sig <- merged_df[merged_df$Cluster %in% annot_df_sig$Cluster_ordered,]
+merged_df_sig$Cluster_ordered <- factor(merged_df_sig$Cluster_ordered, levels = sort(unique(as.numeric(as.character(merged_df_sig$Cluster)))))
+
+final_abundance_graph_cd8 <- ggplot(merged_df_sig) +
+    geom_bar(aes(x = Infection, y = Organ_Proportion, fill = Infection), colour = "black", stat = "identity", position = position_dodge(width = 1)) + geom_signif(data = annot_df_sig,
+aes(xmin = start, xmax = end, annotations = label, y_position = y), textsize = 3, vjust = -0.2, manual = TRUE) +
+    facet_grid(cols = vars(Cluster_ordered), rows = vars(Organ), scales = "free_y", space = "fixed") +
+    labs(x = "CD8 Cluster", y = "Proportion of Organ in Cluster") +
+    scale_x_discrete(position = "top") +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1))) +
+    theme(axis.text.x=element_blank(),
+          axis.ticks.x=element_blank(), legend.position = "top", strip.text.y.right = element_text(angle = 0)) +
+    guides(y.sec = guide_none("Organ"))
+
+merged_df_sig <-  merged_df_sig %>%
+  mutate(Clust_annot = case_when(
+    Cluster == "0" ~ "Naive CD8+ Lung/Colon",
+    Cluster == "2" ~ "Eff Mem CD8+ Colon",
+    Cluster == "4" ~ "Ly6c2+ CD8+ Lung/Colon",
+    Cluster == "6" ~ "KLRG1+ Eff CD8+ Lung",
+    Cluster == "7" ~ "Isg15+ CD8+ mLns",
+    TRUE ~ as.character(Cluster)  # Keep other values unchanged
+  ))
+
+annot_df_sig <-  annot_df_sig %>%
+  mutate(Clust_annot = case_when(
+    Cluster_ordered == "0" ~ "Naive CD8+ Lung/Colon",
+    Cluster_ordered == "2" ~ "Eff Mem CD8+ Colon",
+    Cluster_ordered == "4" ~ "Ly6c2+ CD8+ Lung/Colon",
+    Cluster_ordered == "6" ~ "KLRG1+ Eff CD8+ Lung",
+    Cluster_ordered == "7" ~ "Isg15+ CD8+ mLns",
+    TRUE ~ as.character(Cluster_ordered)  # Keep other values unchanged
+  ))
+
+final_abundance_graph_cd8_annot <- ggplot(merged_df_sig) +
+    geom_bar(aes(x = Infection, y = Organ_Proportion, fill = Infection), colour = "black", stat = "identity", position = position_dodge(width = 1)) + geom_signif(data = annot_df_sig,
+aes(xmin = start, xmax = end, annotations = label, y_position = y), textsize = 3, vjust = -0.2, manual = TRUE) +
+    facet_grid(cols = vars(Clust_annot), rows = vars(Organ), scales = "free_y", space = "fixed") +
+    labs(x = "CD4 Cluster", y = "Proportion of Organ in Cluster") +
+    scale_x_discrete(position = "top") +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
+  theme_bw()+
+    theme(axis.text.x=element_blank(),
+          axis.ticks.x=element_blank(), legend.position = "top", legend.title = element_text(size = 10),legend.text = element_text(size = 10), strip.text.y.right = element_text(angle = 0)) +
+    guides(y.sec = guide_none("Organ"))
+```
+
+# Fig 9 Part 2
+```{r}
+CD8_colors <- c("#865640",paletteer_d("ggthemes::calc"))
+CD8_colors_new <- c("#865640",paletteer_d("ggthemes::calc"))
+
+CD8_colors_sig2 <- c("#FF420EFF", "#314004FF", "#83CAFFFF", "#579D1CFF", "#865640", "grey")
+
+
+seurat_object_CD8$CD8_clust_annot_abund_sig <- as.character(seurat_object_CD8$CD8_clust_annot)
+seurat_object_CD8$CD8_clust_annot_abund_sig[!(seurat_object_CD8$CD8_clust_annot_abund_sig %in% unique(merged_df_sig$Clust_annot))] <- "No Abundance Change"
+seurat_object_CD8$CD8_clust_annot_abund_sig <- factor(seurat_object_CD8$CD8_clust_annot_abund_sig)
+
+
+# Colon
+cd8_plot_annot_split_colon_inf <- DimPlot(seurat_object_CD8[,seurat_object_CD8$Organ == "Colon" & seurat_object_CD8$Infection == "Ca"], reduction = "tsne_cd8_", group.by = "CD8_clust_annot_abund_sig", cols = CD8_colors_sig2, pt.size = 1) + ggtitle("Candida Colonized") + theme(plot.title = element_text(size = 10, face = "plain")) + NoLegend()
+cd8_plot_annot_split_colon_noinf <- DimPlot(seurat_object_CD8[,seurat_object_CD8$Organ == "Colon" & seurat_object_CD8$Infection == "No"], reduction = "tsne_cd8_", group.by = "CD8_clust_annot_abund_sig", cols = CD8_colors_sig2, pt.size = 1) + ggtitle("No Infection") + theme(plot.title = element_text(size = 10, face = "plain")) + NoLegend()
+title <- ggplot() + theme_void() + ggtitle("         Colon cells by Infection")
+cd8_colon_inf <- cowplot::plot_grid(cd8_plot_annot_split_colon_inf, cd8_plot_annot_split_colon_noinf, ncol = 2)
+cd8_colon_inf_title <- cowplot::plot_grid(title, cd8_colon_inf, ncol =1, rel_heights = c(0.1, 1))
+
+# Lung
+cd8_plot_annot_split_lung_inf <- DimPlot(seurat_object_CD8[,seurat_object_CD8$Organ == "Lung" & seurat_object_CD8$Infection == "Ca"], reduction = "tsne_cd8_", group.by = "CD8_clust_annot_abund_sig", cols = CD8_colors_sig2, pt.size = 1) + ggtitle("Candida Colonized") + theme(plot.title = element_text(size = 10, face = "plain")) + NoLegend()
+cd8_plot_annot_split_lung_noinf <- DimPlot(seurat_object_CD8[,seurat_object_CD8$Organ == "Lung" & seurat_object_CD8$Infection == "No"], reduction = "tsne_cd8_", group.by = "CD8_clust_annot_abund_sig", cols = CD8_colors_sig2, pt.size = 1) + ggtitle("No Infection") + theme(plot.title = element_text(size = 10, face = "plain")) + NoLegend()
+title <- ggplot() + theme_void() + ggtitle("         Lung cells by Infection")
+cd8_lung_inf <- cowplot::plot_grid(cd8_plot_annot_split_lung_inf, cd8_plot_annot_split_lung_noinf, ncol = 2)
+cd8_lung_inf_title <- cowplot::plot_grid(title, cd8_lung_inf, ncol =1, rel_heights = c(0.1, 1))
+
+# mLns
+CD8_colors_sig2_mlns <- c("#314004FF", "#83CAFFFF", "#579D1CFF", "#865640", "grey")
+
+cd8_plot_annot_split_mlns_inf <- DimPlot(seurat_object_CD8[,seurat_object_CD8$Organ == "mLns" & seurat_object_CD8$Infection == "Ca"], reduction = "tsne_cd8_", group.by = "CD8_clust_annot_abund_sig", cols = CD8_colors_sig2_mlns, pt.size = 1) + ggtitle("Candida Colonized") + theme(plot.title = element_text(size = 10, face = "plain")) + NoLegend()
+cd8_plot_annot_split_mlns_noinf <- DimPlot(seurat_object_CD8[,seurat_object_CD8$Organ == "mLns" & seurat_object_CD8$Infection == "No"], reduction = "tsne_cd8_", group.by = "CD8_clust_annot_abund_sig", cols = CD8_colors_sig2_mlns, pt.size = 1) + ggtitle("No Infection") + theme(plot.title = element_text(size = 10, face = "plain")) + NoLegend()
+title <- ggplot() + theme_void() + ggtitle("         mLns cells by Infection")
+cd8_mlns_inf <- cowplot::plot_grid(cd8_plot_annot_split_mlns_inf, cd8_plot_annot_split_mlns_noinf, ncol = 2)
+cd8_mlns_inf_title <- cowplot::plot_grid(title, cd8_mlns_inf, ncol =1, rel_heights = c(0.1, 1))
+
+# Legend
+legend <- cowplot::get_legend(DimPlot(seurat_object_CD8[,seurat_object_CD8$Organ == "Colon" & seurat_object_CD8$Infection == "Ca"], reduction = "tsne_cd8_", group.by = "CD8_clust_annot_abund_sig", cols = CD8_colors_sig2, pt.size = 1) + ggtitle("Candida Colonized") + theme(plot.title = element_text(size = 10, face = "plain"), legend.position = "top", legend.text = element_text(size = 10)))
+
+title <- ggplot() + theme_void() + ggtitle("         CD8+/CD4- Cells by Infection State in each Organ") + theme(plot.title = element_text(size = 14, face = "bold"))
+organ_inf_tsne <- cowplot::plot_grid(cd8_colon_inf_title, cd8_lung_inf_title, cd8_mlns_inf_title, ncol = 1, labels = c("A", "B", "C"), rel_heights = c(1, 1, 1))
+organ_inf_tsne_w_title_legend <- cowplot::plot_grid(title, legend, organ_inf_tsne, ncol = 1, rel_heights = c(0.05, 0.05, 1))
+abundance_figure_cd8 <- cowplot::plot_grid(organ_inf_tsne_w_title_legend, final_abundance_graph_cd8_annot, ncol = 2, labels = c("", "D"), rel_widths = c(0.4, 0.6))
+```
+
+Save merged_df for CD8
+```{r}
+merged_df_CD8 <- merged_df
+annot_df_sig_CD8 <- annot_df_sig
+```
+
+```{r}
+fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
+
+ggsave(filename = paste0(fig_directory, "figure_9.pdf"), plot = abundance_figure_cd8, device = "pdf", height = 14, width = 20)
+
+ggsave(filename = paste0(fig_directory, "figure_9.jpeg"), plot = abundance_figure_cd8, device = "jpeg", height = 14, width = 20)
+```
+
+# Supplemental Figure 11
+
+```{r}
+merged_df_CD4 <-  merged_df_CD4 %>%
+  mutate(Clust_annot = case_when(
+    Cluster == "0" ~ 'Naive CD4+ Lung',
+    Cluster == "1" ~ 'Naive CD4+ mLns',
+    Cluster == "2" ~ 'Naive CD4+ Lung',
+    Cluster == "3" ~ 'Naive CD4+ Colon', 
+    Cluster == "4" ~ 'Naive CD4+ Colon/Lung',
+    Cluster == "5" ~ 'Treg/Th2 CD4+ Colon/Lung',
+    Cluster == "6" ~ 'Th17 CD4',
+    Cluster == "7" ~ 'Tfh CD4+ mLns',
+    Cluster == "8" ~ 'Effector CD4+ Lung',
+    Cluster == "9" ~ 'Treg CD4+ mLns',
+    Cluster == "10" ~ 'Th1/NK',
+    Cluster == "11" ~ 'Naive Treg CD4+ Lung',
+    Cluster == "12" ~ 'Effector CD4+ Lung/Colon',
+    Cluster == "13" ~ 'Id3+ CD4+ mLns',
+    Cluster == "14" ~ 'Ifng Induced CD4+',
+    Cluster == "15" ~ 'Prolif CD4+ Lung',
+    Cluster == "16" ~ 'Arhgap15+ CD4+ mLns',
+ TRUE ~ as.character(Cluster)  # Keep other values unchanged
+  ))
+
+merged_df_CD8 <-  merged_df_CD8 %>%
+  mutate(Clust_annot = case_when(
+    Cluster == "0" ~ 'Naive CD8+ Lung/Colon',
+    Cluster == "1" ~ 'Naive CD8+ mLns',
+    Cluster == "2" ~ 'Eff Mem CD8+ Colon',
+    Cluster == "3" ~ 'Eff CD8+ Colon',
+    Cluster == "4" ~ 'Ly6c2+ CD8+ Lung/Colon',
+    Cluster == "5" ~ 'TCRGD+ Lung',
+    Cluster == "6" ~ 'KLRG1+ Eff CD8+ Lung',
+    Cluster == "7" ~ 'Isg15+ CD8+ mLns',
+    Cluster == "8" ~ 'Naive CD8+ mLns',
+    Cluster == "9" ~ 'Exhaust CD8+ mLns',
+ TRUE ~ as.character(Cluster)  # Keep other values unchanged
+  ))
+
+```
+
+
+```{r}
+all_abundance_graph_cd4_annot <- ggplot(merged_df_CD4) +
+    geom_bar(aes(x = Infection, y = Organ_Proportion, fill = Infection), colour = "black", stat = "identity", position = position_dodge(width = 1)) + geom_signif(data = annot_df_sig_CD4,
+aes(xmin = start, xmax = end, annotations = label, y_position = y), textsize = 3, vjust = -0.2, manual = TRUE) +
+    facet_grid(cols = vars(Clust_annot), rows = vars(Organ), scales = "free_y", space = "fixed", labeller = label_wrap_gen(width = 10, multi_line = TRUE)) +
+    labs(x = "CD4 Cluster", y = "Proportion of Organ in Cluster") +
+    scale_x_discrete(position = "top") +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
+  theme_bw()+
+    theme(axis.text.x=element_blank(),
+          axis.ticks.x=element_blank(), legend.position = "top", legend.title = element_text(size = 10),legend.text = element_text(size = 10), strip.text.y.right = element_text(angle = 0)) +
+    guides(y.sec = guide_none("Organ"))
+
+
+all_abundance_graph_cd8_annot <- ggplot(merged_df_CD8) +
+    geom_bar(aes(x = Infection, y = Organ_Proportion, fill = Infection), colour = "black", stat = "identity", position = position_dodge(width = 1)) + geom_signif(data = annot_df_sig_CD8,
+aes(xmin = start, xmax = end, annotations = label, y_position = y), textsize = 3, vjust = -0.2, manual = TRUE) +
+    facet_grid(cols = vars(Clust_annot), rows = vars(Organ), scales = "free_y", space = "fixed") +
+    labs(x = "CD8+/CD4- Cluster", y = "Proportion of Organ in Cluster") +
+    scale_x_discrete(position = "top") +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
+  theme_bw()+
+    theme(axis.text.x=element_blank(),
+          axis.ticks.x=element_blank(), legend.position = "none", legend.title = element_text(size = 10),legend.text = element_text(size = 10), strip.text.y.right = element_text(angle = 0)) +
+    guides(y.sec = guide_none("Organ"))
+```
+
+```{r}
+all_abundance <- cowplot::plot_grid(all_abundance_graph_cd4_annot, all_abundance_graph_cd8_annot, labels = c("A", "B"), ncol = 1, rel_heights = c(1, 0.9))
+```
+
+```{r}
+fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
+
+ggsave(filename = paste0(fig_directory, "supplemental_11.pdf"), plot = all_abundance, device = "pdf", height = 14, width = 20)
+
+ggsave(filename = paste0(fig_directory, "supplemental_11.jpeg"), plot = all_abundance, device = "jpeg", height = 14, width = 20)
+```
+
+
+# Supplementary Tables Latex
+```{r}
+library(xtable)
+latex_table <- xtable(df_CD8, caption = "CD8 Abundance Analysis", label = "tab:sample")
+
+# Print the LaTeX code
+print(latex_table, caption.placement = "top", include.rownames = FALSE)
+
+latex_table <- xtable(df_CD4, caption = "CD4 Abundance Analysis", label = "tab:sample")
+
+# Print the LaTeX code
+print(latex_table, caption.placement = "top", include.rownames = FALSE)
+
+```

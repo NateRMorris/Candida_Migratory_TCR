@@ -1,0 +1,133 @@
+---
+title: "Candida_tcr_Cytoscape"
+author: "Nathan Morris"
+date: "2023-10-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+```
+
+And we get the object containing our filtered TCR data
+```{r}
+IGT27_TCR <- read.table(paste0(data_dir, "IGT27_for_analysis.tsv"), header = TRUE, sep = "\t")
+```
+
+# 9. Cytoscape
+https://cytoscape.org/download.html
+https://manual.cytoscape.org/en/stable/Supported_Network_File_Formats.html
+https://cytoscape.org/cytoscape-tutorials/contents/index.html#/presentations
+
+
+```{r}
+library(RCy3)
+```
+
+```{r}
+cytoscapePing()
+cytoscapeVersionInfo()
+```
+
+Creating the Edge File
+fromNode, toNode, weight, direction, fromAltName, to AltName
+undirected,NA,NA
+
+Creating the Node file
+nodeName, altName, nodeAttr[nodesPresent,]
+,NA,purple
+
+```{r}
+results_nodes <- list()
+results_edges <- list()
+
+mice <- c("mouse0082", "mouse0080", "mouse0081")
+
+temp_df <- IGT27_TCR
+
+for (mouse in mice){
+  temp_mouse <- temp_df[temp_df$Mouse == mouse,]
+  
+  tcr_copy_num <- as.data.frame(table(temp_mouse$clonotype))
+  colnames(tcr_copy_num) <- c("clonotype", "clonotype_frequency")
+  merged_mouse <- merge(temp_mouse, tcr_copy_num, by = "clonotype")
+    
+  for (organ in organs){
+    merged_organ <- merged_mouse[merged_mouse$Organ == organ,]
+    merged_organ <- merged_organ[!is.na(merged_organ$clonotype),]
+    
+    nodes_temp <- unique(merged_organ$clonotype)
+    nodes_score_temp <- sapply(nodes_temp, function(x) {subset_data <- sum(merged_mouse$clonotype == x)
+    return(subset_data) })
+    node_color <- sapply(nodes_score_temp, color_mapping)
+    
+    results_nodes[[paste0(mouse,"_",organ)]] <- data.frame(nodes_temp, nodes_score_temp, unique(merged_organ$Sample),  "NA", node_color) 
+    results_edges[[paste0(mouse,"_",organ)]] <- data.frame(unique(merged_organ$clonotype), unique(merged_organ$clonotype)[1], 1, "undirected", "NA", "NA" )
+    
+    # target - unique(merged_organ$Sample)
+    
+    colnames(results_nodes[[paste0(mouse,"_",organ)]]) <-  c("id","score", "group", "altName", "node_attributes")
+    colnames(results_edges[[paste0(mouse,"_",organ)]]) <- c("source", "target", "weight", "direction", "fromAltName", "toAltName")
+  }
+}
+```
+
+```{r}
+# Define a mapping from values to colors
+color_mapping <- function(value) {
+  # Define color mapping based on the value
+  if (value == 1) {
+    return("purple")
+  } else if (value == 2) {
+    return("green")
+  } else if (value == 3) {
+    return("blue")
+  } else if (value == 4) {
+    return("orange")
+  } else if (value == 5) {
+    return("red")
+  } else if (value == 6) {
+    return("magenta")
+  } else {
+    return("yellow")  # You can specify a default color for other values
+  }
+}
+```
+
+Attach all nodes and edges
+```{r}
+nodes_all <- rbind(na.omit(results_nodes$mouse0081_Colon), na.omit(results_nodes$mouse0081_Lung), na.omit(results_nodes$mouse0081_mLns), na.omit(results_nodes$mouse0080_Colon), na.omit(results_nodes$mouse0080_Lung), na.omit(results_nodes$mouse0080_mLns), na.omit(results_nodes$mouse0082_Colon), na.omit(results_nodes$mouse0082_Lung), na.omit(results_nodes$mouse0082_mLns))
+
+nodes <- nodes_all
+
+edges_all <- rbind(na.omit(results_edges$mouse0081_Colon), na.omit(results_edges$mouse0081_Lung), na.omit(results_edges$mouse0081_mLns), na.omit(results_edges$mouse0080_Colon), na.omit(results_edges$mouse0080_Lung), na.omit(results_edges$mouse0080_mLns), na.omit(results_edges$mouse0082_Colon), na.omit(results_edges$mouse0082_Lung), na.omit(results_edges$mouse0082_mLns))
+
+edges <- edges_all
+```
+
+```{r}
+colnames(edges) <- c("source", "target", "weight", "direction", "fromAltName", "toAltName")
+colnames(nodes) <- c("id", 'score', "altName", "node_attributes")
+```
+
+```{r}
+createNetworkFromDataFrames(nodes,edges, title="2 Candida TCR Network with Clonotype Freq Sized/Colored Nodes", collection="DataFrame Example")
+setNodeSizeMapping('score', c(min(nodes$score),max(nodes$score)), c(10,60), style.name = "Sample3")
+setNodeColorMapping('score', colors=paletteColorBrewerRdBu, style.name = "Sample3")
+#setVisualStyle("Sample3")
+```
+
+Here, we can see I have 7197 nodes. This is equivalent to length(unique(IGT27_TCR$clonotype[!IGT27_TCR$Sample %in% c("Negative", "Spleen_control")]))
+
+Reducing to clonotypes with at least 2 cells would reduce our node number from 7197 to 93.
+length(unique(IGT27_TCR$clonotype[IGT27_TCR$duplicate == TRUE]))
+table(table(IGT27_TCR$clonotype))
+
+https://cytoscape.org/RCy3/reference/setNodeSizeMapping.html
+Could be helpful for node size mapping

@@ -1,0 +1,224 @@
+---
+title: "Candida_sc_CD4_diff"
+author: "Nathan Morris"
+date: "2024-01-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = getwd())
+```
+
+### Data Import
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+# Data Import
+library(Seurat)
+library(scater)
+library(dplyr)
+library(SingleR)
+library(celldex)
+library(scRNAseq)
+library(scran)
+library(gridExtra)
+library(pheatmap)
+library(ess)
+library(reshape2)
+library(ggpubr)
+library(scCustomize)
+library(gridExtra)
+library(monocle3)
+
+## For Reticulate (Python-R wrapper)
+conda_list()
+use_condaenv("r-reticulate")    #activate an environment e.g py2_env
+py_install("opentsne")
+reticulate::py_install("phate", pip=TRUE)
+devtools::install_github("KrishnaswamyLab/phateR")
+py_install("fa2")
+
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+```
+
+```{r}
+seurat_object <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT_new_metadata.Rds"))
+```
+
+# 3. Subsetting only CD4 Differentiated Cells based on Markers
+
+Question - How would we like to subset cells - 
+1. Subset by first clustering them all, finding marker genes and then selecting certain clusters with marker genes?
+
+2. Subset the cells by Expression of CD4 and Sell (Differentiated CD4 T cells), then re-cluster
+
+
+
+```{r}
+FeatureScatter(seurat_object, feature1 = "CD4", feature2 = "CD8A")
+
+FeatureScatter(seurat_object, feature1 = "CD4", feature2 = "Sell")
+FeatureScatter(seurat_object, feature1 = "CD4", feature2 = "CD44")
+
+FeatureScatter(seurat_object, feature1 = "CD44", feature2 = "Sell")
+FeatureScatter(seurat_object, feature1 = "CD4", feature2 = "CD62L")
+
+Idents(seurat_object) <- "RNA_clusters"
+RidgePlot(seurat_object, features = "CD44")
+# This makes me think we can separate at like a 1.5 expression level in order to 
+
+
+Idents(seurat_object) <- "RNA_clusters"
+RidgePlot(seurat_object, features = "Sell")
+```
+
+```{r}
+DefaultAssay(seurat_object) <- "ADT"
+Idents(seurat_object) <- "RNA_clusters"
+
+seurat_object_CD4 <- subset(x = seurat_object, subset = CD4 > 1.5)
+
+DefaultAssay(seurat_object_CD4) <- "RNA"
+seurat_object_CD4_diff <- subset(x = seurat_object_CD4, subset = Sell < 0.5)
+
+seurat_object$CD4_cell <- seurat_object$cell_barcode %in% seurat_object_CD4$cell_barcode
+
+seurat_object$CD4_cell_diff <- seurat_object$cell_barcode %in% seurat_object_CD4_diff$cell_barcode
+
+DimPlot(seurat_object, group.by = "CD4_cell_diff", reduction = "umap_rna")
+
+FeaturePlot(seurat_object, features = "CD62L", reduction = 'umap_rna')
+```
+
+```{r}
+seurat_object_CD4_diff <- seurat_object_CD4_diff %>% NormalizeData(verbose = FALSE) %>% FindVariableFeatures(selection.method = "vst", nfeatures = 2000) %>% ScaleData(verbose = TRUE)
+seurat_object_CD4_diff <- seurat_object_CD4_diff %>% RunPCA(pc.genes = seurat_object_CD4_diff@var.genes, npcs = 30, verbose = FALSE) %>%  RunUMAP(dims = 1:25, reduction.name = "umap_cd4_") %>% RunTSNE(dims = 1:25, reduction.name = "tsne_cd4_") %>% FindNeighbors(dims = 1:25,compute.SNN=TRUE) %>% FindClusters(resolution = c(0.1,0.2,0.4,0.6,0.8,1), cluster.name = "cd4_") %>% DoopenTSNE(reduction_save = "openTSNE_cd4_",dims_use = 1:25) %>% DoForceAtlas2(reduction_use = "pca", reduction_save = "fa2_cd4_", dims_use = 1:25)
+```
+
+Or you can use this if you'd like to take the Annotated clusters
+```{r}
+seurat_object_CD4_diff <- readRDS(file = paste0(data_dir, "seurat_object_CD4_diff.rds"))
+```
+
+
+# 3.A Subsetted cells - Old RNA clusters in old RNA UMAP
+
+```{r}
+Idents(object = seurat_object_CD4_diff) <- "RNA_clusters"
+#Idents(object = seurat_object_high_clust) <- "ADT_snn_res.1.8"
+```
+
+```{r}
+DimPlot(seurat_object_CD4_diff, reduction = "umap_rna", label = FALSE, repel = TRUE, split.by = "Infection")
+```
+
+# 3.B Subsetted cells - Old RNA clusters in new Dimension Reduction
+```{r}
+DimPlot(seurat_object_CD4_diff, reduction = "pca", label = FALSE, repel = TRUE, split.by = "Infection")
+DimPlot(seurat_object_CD4_diff, reduction = "umap_cd4_", label = FALSE, repel = TRUE, split.by = "Infection")
+DimPlot(seurat_object_CD4_diff, reduction = "tsne_cd4_", label = FALSE, repel = TRUE, split.by = "Infection")
+DimPlot(seurat_object_CD4_diff, reduction = "openTSNE_cd4_", label = FALSE, repel = TRUE, split.by = "Infection")
+DimPlot(seurat_object_CD4_diff, reduction = "fa2_cd4_", label = FALSE, repel = TRUE, split.by = "Infection")
+```
+
+# 3.C Subsetted cells - New RNA clusters in new Dimension Reduction
+
+```{r}
+Idents(object = seurat_object_CD4_diff) <- "RNA_snn_res.0.8"
+
+DimPlot(seurat_object_CD4_diff, reduction = "umap_cd4_", label = FALSE, repel = TRUE, split.by = "Infection")
+DimPlot(seurat_object_CD4_diff, reduction = "tsne_cd4_", label = FALSE, repel = TRUE, split.by = "Infection")
+DimPlot(seurat_object_CD4_diff, reduction = "openTSNE_cd4_", label = FALSE, repel = TRUE, split.by = "Infection")
+DimPlot(seurat_object_CD4_diff, reduction = "fa2_cd4_", label = FALSE, repel = TRUE, split.by = "Infection")
+```
+
+
+```{r}
+seurat_object_CD4_diff$CD4_diff_clust <- seurat_object_CD4_diff$RNA_snn_res.0.8
+```
+
+```{r}
+DimPlot(seurat_object_CD4_diff, reduction = "umap_cd4_", label = FALSE, repel = TRUE, split.by = "Mouse_New", group.by = "CD4_diff_clust")
+```
+
+```{r}
+df_cd4_mouse <- table(seurat_object_CD4_diff$Mouse_New, seurat_object_CD4_diff$CD4_diff_clust, seurat_object_CD4_diff$Organ)
+
+temp <- as.data.frame(melt(df_cd4_mouse))
+colnames(temp) <- c("Mouse", "Cluster","Organ", "Freq")
+```
+
+
+```{r}
+ggplot(temp, aes(x = Mouse, y = Freq, color = Mouse)) +
+  geom_boxplot() +
+  labs(
+    x = "Cluster",
+    y = "Frequency",
+    title = "Boxplot of Frequency by Cluster and Condition") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_grid(Organ ~ Cluster) +
+  theme(legend.position = "top")
+```
+
+# 3.C Il-17 Gene Set Score
+
+Below gene sets are from: https://www.nature.com/articles/s41590-020-00836-7 / https://static-content.springer.com/esm/art%3A10.1038%2Fs41590-020-00836-7/MediaObjects/41590_2020_836_MOESM1_ESM.pdf
+
+```{r}
+Il17.gene.set <- c("Il17a", "Il17f", "Il22", "Ccr6", "Il23r", "Rorc", "Tmem176a")
+Th1.gene.set <- c("Ifng", "Tbx21", "Cxcr3", "Nkg7", "Fasl", "Il2", "Tnf", "Il12rb1", "Il12rb2", "Gzmb")
+Th2.gene.set <- c("Gata3", "Il4", "Il5", "Il13", "Il10", "Areg", "Maf", "Il17rb")
+Tfh.gene.set <- c("Cxcr5", "Izumo1r", "Nt5e", "Bcl6", "Slamf6", "Cd200", "Ccr7", "Tcf7")
+
+# Get mean expression of genes of interest per cell
+mean.exp <- colMeans(x = seurat_object_CD4_diff@assays[["RNA"]][Il17.gene.set, ], na.rm = TRUE)
+
+# Add mean expression values in 'object@meta.data$gene.set.score'
+if (all(names(x = mean.exp) == rownames(x = seurat_object_CD4_diff@meta.data))) {
+  cat("Cell names order match in 'mean.exp' and 'object@meta.data':\n", 
+      "adding gene set mean expression values in 'object@meta.data$gene.set.score'")
+  seurat_object_CD4_diff@meta.data$Il17.gene.set.score <- mean.exp
+}
+```
+
+# 3.C-1 Il17 Score in Old UMAP
+
+```{r}
+# Plot mean expression using Seurat::FeaturePlot()
+FeaturePlot(object = seurat_object_CD4_diff, features = "Il17.gene.set.score", reduction = "umap_rna") 
+#scale_color_manual(values = c("grey", "forestgreen", "yellow", "red")) + labs(color = "Expression")
+
+FeaturePlot(object = seurat_object_CD4_diff, features = "Il17.gene.set.score", reduction = "umap_cd4_", split.by = "Infection") 
+```
+
+# 3.C-2 Il17 Score in New Dimension Reductions
+
+```{r}
+FeaturePlot(object = seurat_object_CD4_diff, features = "Il17.gene.set.score", reduction = "umap_cd4_")
+
+FeaturePlot(object = seurat_object_CD4_diff, features = "Il17.gene.set.score", reduction = "tsne_cd4_")
+
+FeaturePlot(object = seurat_object_CD4_diff, features = "Il17.gene.set.score", reduction = "openTSNE_cd4_")
+
+FeaturePlot(object = seurat_object_CD4_diff, features = "Il17.gene.set.score", reduction = "fa2_cd4_")
+```
+
+```{r}
+saveRDS(seurat_object_CD4_diff, file = paste0(data_dir, "seurat_object_CD4_diff.rds"))
+```
+
+
+# 3.D Selecting Clusters that look Differentiated on CD44/CD4
+
+```{r}
+seurat_object <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT_new_metadata.Rds"))
+```
+
+```{r}
+Idents(object = seurat_object) <- "RNA_clusters"
+subselected_so <- subset(x = seurat_object, idents = c("7", "9", "5", "13", "11", "12"))
+
+DimPlot(subselected_so, reduction = "umap_rna", group.by = "RNA_clusters", split.by = "Infection")
+```

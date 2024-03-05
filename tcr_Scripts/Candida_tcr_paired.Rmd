@@ -20,12 +20,13 @@ setwd(data_dir)
 
 Here, we use the pre-existing seurat object.
 ```{r}
-seurat_object_unfiltered <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT.Rds"))
+seurat_object <- readRDS(file = paste0(data_dir, "/dataset_w_annot.rds"))
+#seurat_object_unfiltered <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT.Rds"))
 
 #seurat_object_WNN <- readRDS("Candida_ds_clean_WNN.rds") # I didn't include WNN analysis in this document
 #seurat_object <- readRDS(file = paste0(data_dir, "dataset_post_sc_Analysis.rds")) #If you want without WNN Clusters and without TCR Information
 
-seurat_object_pseudo <- readRDS(file = paste0(data_dir, "pseudotime_seurat.rds"))
+#seurat_object_pseudo <- readRDS(file = paste0(data_dir, "pseudotime_seurat.rds"))
 ```
 
 # Load Packages
@@ -139,12 +140,13 @@ IGT27_TCR <- IGT27_TCR %>% group_by(Mouse, clonotype) %>% mutate(Clonotype_frequ
 We also add the RNA clusters using the metadata in the seurat object that was before our filtering (directly from collaborators).
 
 ```{r}
-IGT27_TCR$RNA_clusters <- seurat_object_unfiltered$RNA_clusters[match(IGT27_TCR$Barcode, rownames(seurat_object_unfiltered@meta.data))]
+#IGT27_TCR$RNA_clusters <- seurat_object$RNA_clusters[match(IGT27_TCR$Barcode, rownames(seurat_object@meta.data))]
+IGT27_TCR$CD_annot <- seurat_object$CD_annot[match(IGT27_TCR$Barcode, rownames(seurat_object@meta.data))]
 ```
 
 Here we show the distribution of different clusters that have TCR data in the filtered object. There are a lot of cells in cluster 0, 2 and 3 with TCR data, however this is consistent and directly correlated to the total cells in each cluster in the seurat object. 
 
-```{r}
+```
 table(IGT27_TCR$RNA_clusters, useNA = "ifany")
 table(seurat_object_unfiltered$RNA_clusters) # Post filtering seurat object clusters
 ```
@@ -517,8 +519,8 @@ for (mouse in mice){
 Graph
 ```{r}
 all_plots <- tcr_plots_organs[["mouse0082"]] + tcr_plots_organs[["mouse0081"]] + tcr_plots_organs[["mouse0080"]]
-plot <- all_plots + plot_annotation(title = "Shared Clonotypes between Organs for each Mouse")
-plot
+migratory_plot <- all_plots + plot_annotation(title = "Shared Clonotypes between Organs for each Mouse")
+migratory_plot
 
 #Reduce(intersect,  x_m0)
 #intersect(x_m0$mLns, x_m0$Colon)
@@ -539,11 +541,11 @@ Infected_male_migratory_clonos <- intersect(x_mouse0080$Lung, x_mouse0080$Colon)
 mouse_shared_clonos <- as.data.frame(table(IGT27_TCR[IGT27_TCR$clonotype %in% Infected_male_migratory_clonos,]$clonotype, IGT27_TCR[IGT27_TCR$clonotype %in% Infected_male_migratory_clonos,]$Organ))
 mouse_shared_clonos$clono_head <- (substr(mouse_shared_clonos$Var1, 1, 16))
 
-ggplot(mouse_shared_clonos,  aes(x=clono_head, y=Freq, fill = Var2)) +
+p1 <- ggplot(mouse_shared_clonos,  aes(x=clono_head, y=Freq, fill = Var2)) +
     geom_bar(stat="identity") +
     labs(x = "Clonotype", y = "Number of Cells", fill = "Organ") + 
   theme(axis.text.x = element_text(angle = 45)) + 
-  ggtitle("Number of Cells in Cells in Migratory Clonotypes - Infected Male")
+  ggtitle("Migratory Clonotypes Cell Count - Infected Male")
 ```
 
 Infected Female
@@ -554,11 +556,11 @@ Infected_female_migratory_clonos <- intersect(x_mouse0081$Lung, x_mouse0081$Colo
 mouse_shared_clonos <- as.data.frame(table(IGT27_TCR[IGT27_TCR$clonotype %in% Infected_female_migratory_clonos,]$clonotype, IGT27_TCR[IGT27_TCR$clonotype %in% Infected_female_migratory_clonos,]$Organ))
 mouse_shared_clonos$clono_head <- (substr(mouse_shared_clonos$Var1, 1, 16))
 
-ggplot(mouse_shared_clonos,  aes(x=clono_head, y=Freq, fill = Var2)) +
+p2 <- ggplot(mouse_shared_clonos,  aes(x=clono_head, y=Freq, fill = Var2)) +
     geom_bar(stat="identity") +
     labs(x = "Clonotype", y = "Number of Cells", fill = "Organ") + 
   theme(axis.text.x = element_text(angle = 45)) + 
-  ggtitle("Number of Cells in Cells in Migratory Clonotypes - Infected Female")
+  ggtitle("Migratory Clonotypes Cell Count - Infected Female")
 ```
 
 ```{r}
@@ -568,11 +570,11 @@ Noninfected_male_migratory_clonos <- append(Noninfected_male_migratory_clonos, i
 mouse_shared_clonos <- as.data.frame(table(IGT27_TCR[IGT27_TCR$clonotype %in% Noninfected_male_migratory_clonos,]$clonotype, IGT27_TCR[IGT27_TCR$clonotype %in% Noninfected_male_migratory_clonos,]$Organ))
 mouse_shared_clonos$clono_head <- (substr(mouse_shared_clonos$Var1, 1, 16))
 
-ggplot(mouse_shared_clonos,  aes(x=clono_head, y=Freq, fill = Var2)) +
+p3 <- ggplot(mouse_shared_clonos,  aes(x=clono_head, y=Freq, fill = Var2)) +
     geom_bar(stat="identity") +
     labs(x = "Clonotype", y = "Number of Cells", fill = "Organ") + 
   theme(axis.text.x = element_text(angle = 45)) + 
-  ggtitle("Number of Cells in Cells in Migratory Clonotypes - Non-infected Male")
+  ggtitle("Migratory Clonotypes Cell Count - Non-infected Male")
 ```
 
 ```{r}
@@ -612,6 +614,23 @@ ggplot(mice_shared_clonos,  aes(x=clono_head, y=Freq, fill = Var2, colour = Mous
   theme(axis.text.x = element_text(angle = 45)) + 
   ggtitle("Number of Cells in Clonotypes Shared between Infected Mice")
 ```
+
+# FIGURE 16
+
+```{r}
+migratory_freq <- cowplot::plot_grid(p3, p2, p1, nrow = 1)
+
+fig_16 <- cowplot::plot_grid(migratory_plot, migratory_freq, ncol = 1, labels = c("A", "B"))
+```
+
+```{r}
+fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
+
+ggsave(filename = paste0(fig_directory, "figure_16.pdf"), plot = fig_16, device = "pdf", height = 12, width = 24)
+
+ggsave(filename = paste0(fig_directory, "figure_16.jpeg"), plot = fig_16, device = "jpeg", height = 12, width = 24)
+```
+
 
 ### 1.F-4 Paired Clonotypes by Shared Organ Heatmap/Venn Diagram - Only Cluster 5
 
@@ -792,7 +811,7 @@ parameters <- c("RNA_clusters", "Organ", "Mouse")
 for (parameter in parameters){
   tmp_df_inf <- as.data.frame(table(IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE & IGT27_TCR$Infection == "Yes" ,][,parameter]))
   tmp_df_noinf <- as.data.frame(table(IGT27_TCR[IGT27_TCR$paired_across_organ == TRUE & IGT27_TCR$Infection == "No" ,][,parameter]))
-  merged_df <- merge(tmp_df_inf, tmp_df_noinf, by = "Var1", suffixes = c("_Infection", "_NoInfection"))
+  merged_df <- merge(tmp_df_inf, tmp_df_noinf, by = parameter, suffixes = c("_Infection", "_NoInfection"))
   colnames(merged_df) <- c(parameter, "Freq_Infection", "Freq_NoInfection")
   #merged_df$Freq_Total <- rowSums(merged_df[, c("Freq_Infection", "Freq_NoInfection")])
   dataframes_paired[[parameter]] <- merged_df

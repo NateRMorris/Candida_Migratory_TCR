@@ -1,0 +1,106 @@
+---
+title: "Candida_sc_neuro_interleukins"
+author: "Nathan Morris"
+date: "2024-01-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = getwd())
+```
+
+### Data Import
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+# Data Import
+library(Seurat)
+library(scater)
+library(dplyr)
+library(SingleR)
+library(celldex)
+library(scRNAseq)
+library(scran)
+library(gridExtra)
+library(pheatmap)
+library(ess)
+library(reshape2)
+library(ggpubr)
+library(scCustomize)
+library(gridExtra)
+library(monocle3)
+
+## For Reticulate (Python-R wrapper)
+conda_list()
+use_condaenv("r-reticulate")    #activate an environment e.g py2_env
+py_install("opentsne")
+reticulate::py_install("phate", pip=TRUE)
+devtools::install_github("KrishnaswamyLab/phateR")
+py_install("fa2")
+
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+```
+
+```{r}
+seurat_object <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT_new_metadata.Rds"))
+```
+
+
+# 8. Interleukins for Takato
+
+```{r}
+il_genes <- sort(grep("^Il", rownames(seurat_object@assays[["RNA"]]), value = TRUE))
+
+il_genes_short <- c("Il6","Il23a", "Il23r","Il17a", "Il10", "Il16", "Il12a", "Il13", "Il21", "Il22", "Il2", "Il3", "Il4", "Il5", "Il7", "Il9")
+
+seurat_object$RNA_inf <- paste0(seurat_object$RNA_clusters,"-", seurat_object$Infection)
+
+DotPlot(seurat_object, assay = "RNA", features = il_genes[0:50], group.by = "RNA_inf") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+DotPlot(seurat_object, assay = "RNA", features = il_genes[50:90], group.by = "RNA_inf") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+DotPlot(seurat_object, assay = "RNA", features = il_genes_short, group.by = "RNA_inf") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+  
+```{r}
+seurat_object$RNA_new_inf <- paste0(seurat_object$New_RNA_clust,"-", seurat_object$Infection)
+
+DotPlot(seurat_object, assay = "RNA", features = il_genes[0:50], group.by = "RNA_new_inf") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+DotPlot(seurat_object, assay = "RNA", features = il_genes[50:90], group.by = "RNA_new_inf") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+DotPlot(seurat_object, assay = "RNA", features = il_genes_short, group.by = "RNA_new_inf") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+  
+  
+```
+VlnPlot(seurat_object, features = c(neuro_related_gois), ncol = 3)
+AverageExpression(seurat_object, features = c(neuro_related_gois), ncol = 3)
+
+FeaturePlot(seurat_object, features = c(neuro_related_gois), reduction = 'umap_rna', cols = c("yellow","red"), ncol = 3)
+```
+
+# 8. Neuro Related Genes
+
+
+```{r}
+neuro_related_gois <- c("Calca", "Ramp1", "Ramp3", "Ntrk3", "Gch1", "Nr3c1", "Bex3")
+
+
+VlnPlot(seurat_object, features = c(neuro_related_gois), ncol = 3)
+AverageExpression(seurat_object, features = c(neuro_related_gois), ncol = 3)
+
+FeaturePlot(seurat_object, features = c(neuro_related_gois), reduction = 'umap_rna', cols = c("yellow","red"), ncol = 3)
+```
+
+```{r}
+VlnPlot(seurat_object[,seurat_object$RNA_clusters == "5"], features = c(neuro_related_gois), group.by = "Infection")
+
+AverageExpression(seurat_object[,seurat_object$RNA_clusters == "5"], features = c(neuro_related_gois), group.by = "Infection")
+
+VlnPlot(seurat_object[,seurat_object$RNA_clusters == "12"], features = c(neuro_related_gois), group.by = "Infection")
+
+AverageExpression(seurat_object[,seurat_object$RNA_clusters == "12"], features = c(neuro_related_gois), group.by = "Infection")
+```
+

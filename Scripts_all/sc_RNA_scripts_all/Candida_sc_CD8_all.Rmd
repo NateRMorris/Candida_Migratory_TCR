@@ -1,0 +1,630 @@
+---
+title: "Candida_sc_CD8"
+author: "Nathan Morris"
+date: "2024-01-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = getwd())
+```
+
+### Data Import
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+# Data Import
+library(Seurat)
+library(scater)
+library(dplyr)
+library(SingleR)
+library(celldex)
+library(scRNAseq)
+library(scran)
+library(gridExtra)
+library(pheatmap)
+library(ess)
+library(reshape2)
+library(ggpubr)
+library(scCustomize)
+library(gridExtra)
+library(monocle3)
+library(cowplot)
+library(reticulate)
+library(ReductionWrappers)
+library(reshape2)
+
+## For Reticulate (Python-R wrapper)
+conda_list()
+use_condaenv("r-reticulate")    #activate an environment e.g py2_env
+py_install("opentsne")
+reticulate::py_install("phate", pip=TRUE)
+devtools::install_github("KrishnaswamyLab/phateR")
+py_install("fa2")
+
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+```
+
+```{r}
+seurat_object <- readRDS(file = paste0(data_dir,"/dataset_post_QC.rds"))
+```
+
+# 1. Subsetting only CD8 Differentiated Cells based on Markers
+
+# Visualizing the splitting on CD8
+```{r}
+FeatureScatter(seurat_object, feature1 = "CD4", feature2 = "CD8A") + geom_vline(xintercept = 0.75, linetype = "dashed", color = "red", size = 1.5) + geom_hline(yintercept = 0.75, linetype = "dashed", color = "blue", size = 1.5)
+
+FeatureScatter(seurat_object, feature1 = "CD8", feature2 = "CD444") + geom_vline(xintercept = 0.75, linetype = "dashed", color = "red", size = 1.5)
+
+Idents(seurat_object) <- "RNA_clusters"
+RidgePlot(seurat_object, features = "CD8A") + geom_vline(xintercept = 0.75, linetype = "dashed", color = "red", size = 1.5)
+#FeatureScatter(seurat_object, feature1 = "CD8", feature2 = "Sell")
+#FeatureScatter(seurat_object, feature1 = "CD8", feature2 = "CD84")
+#FeatureScatter(seurat_object, feature1 = "CD8", feature2 = "CD62L")
+```
+
+Splitting on CD84
+```
+FeatureScatter(seurat_object, feature1 = "CD84", feature2 = "Sell")
+
+RidgePlot(seurat_object, features = "CD84")
+RidgePlot(seurat_object, features = "Sell")
+```
+
+# 1.B Splitting into CD8 Seurat Object
+
+```{r}
+DefaultAssay(seurat_object) <- "ADT"
+Idents(seurat_object) <- "RNA_clusters"
+
+seurat_object_CD8 <- subset(x = seurat_object, subset = CD4 < 0.75)
+#seurat_object_CD8 <- subset(x = seurat_object, subset = CD8A > 0.75 & CD4 < 0.75)
+```
+
+# 1.C Dimension Reduction and Normalization
+
+```{r}
+DefaultAssay(seurat_object_CD8) <- "RNA"
+
+seurat_object_CD8 <- seurat_object_CD8 %>% NormalizeData(verbose = FALSE) %>% FindVariableFeatures(selection.method = "vst", nfeatures = 2000) %>% ScaleData(verbose = TRUE)
+seurat_object_CD8 <- seurat_object_CD8 %>% RunPCA(pc.genes = seurat_object_CD8@var.genes, npcs = 50, verbose = FALSE) %>%  RunUMAP(dims = 1:15, reduction.name = "umap_cd8_") %>% RunTSNE(dims = 1:15, reduction.name = "tsne_cd8_") %>% FindNeighbors(dims = 1:15,compute.SNN=TRUE) %>% FindClusters(resolution = c(0.1,0.2,0.4,0.6,0.8,1), cluster.name = "cd8_") %>% DoopenTSNE(reduction_save = "openTSNE_cd8_",dims_use = 1:15) %>% DoForceAtlas2(reduction_use = "pca", reduction_save = "fa2_cd8_", dims_use = 1:15)
+```
+
+```{r}
+ElbowPlot(seurat_object_CD8, ndims = 50, reduction = "pca") + ggtitle("CD8 PCA Elbow Plot")
+```
+
+
+# 1.D CD8 Cells - Old RNA clusters in old RNA UMAP
+
+```{r}
+library(paletteer)
+library(cowplot)
+library(SCpubr)
+
+CD8_colors <- c("#865640",paletteer_d("ggthemes::calc"))
+```
+
+```{r}
+Idents(object = seurat_object_CD8_new) <- "RNA_clusters"
+DimPlot(seurat_object_CD8_new, reduction = "umap_rna", label = TRUE, repel = TRUE, split.by = "Infection") + theme_cowplot(12)
+```
+
+# 1.F Subsetted cells - New CD8 clusters in new Dimension Reduction
+
+# Split by Infection
+```{r}
+Idents(object = seurat_object_CD8) <- "RNA_snn_res.0.8"
+DimPlot(seurat_object_CD8, reduction = "pca", label = FALSE, repel = TRUE, split.by = "Infection", cols = CD8_colors)
+DimPlot(seurat_object_CD8, reduction = "umap_cd8_", label = FALSE, repel = TRUE, split.by = "Infection", cols = CD8_colors)
+DimPlot(seurat_object_CD8, reduction = "tsne_cd8_", label = FALSE, repel = TRUE, split.by = "Infection")
+DimPlot(seurat_object_CD8, reduction = "openTSNE_cd8_", label = FALSE, repel = TRUE, split.by = "Infection")
+DimPlot(seurat_object_CD8, reduction = "fa2_cd8_", label = FALSE, repel = TRUE, split.by = "Infection")
+```
+
+```
+seurat_object_CD8$CD8_clust <- seurat_object_CD8$RNA_snn_res.0.6
+```
+
+# 1.G CD8 Cluster-Organ Frequency FIGURE
+
+```{r}
+df_cd8_mouse <- table(seurat_object_CD8$Mouse_New, seurat_object_CD8$CD8_clust_star, seurat_object_CD8$Organ)
+df_cd8_organ <- table(seurat_object_CD8$CD8_clust_star, seurat_object_CD8$Organ)
+
+temp <- as.data.frame(melt(df_cd8_organ))
+colnames(temp) <- c("Cluster","Organ", "Freq")
+
+temp <- temp %>%
+  group_by(Cluster) %>%
+  mutate(Organ_Cluster_perc = Freq / sum(Freq) * 100)
+
+#Fix the factor for visualization
+temp$Cluster <- factor(temp$Cluster, levels =  c("1*", "8*", "9*", "7*", "4*", "6*", "3*", "0*", "5*", "2*"))
+
+temp$Total_cells <- sum(temp$Freq)
+
+temp <- temp %>%
+  group_by(Cluster) %>% mutate(Cluster_perc = sum(Freq) / Total_cells * 100)
+
+```
+
+```{r}
+organ_perc1_CD8 <- ggplot(temp, aes(x = Cluster, y = Organ_Cluster_perc, fill = Organ)) +
+    geom_bar(stat = "identity", position = "fill") + 
+    labs(title = "CD8 Clusters - Organ Proportion",
+         x = "CD8 Cluster",
+         y = "Proportion of each Cluster",
+         fill = "Organ") + #theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), axis.title.x=element_blank(), legend.position = "none") + geom_label_repel(aes(label = sprintf("%.1f%%", Organ_Cluster_perc)), direction = ("y"),
+               position = position_fill(vjust = 0.5), size = 3)
+```
+
+```{r}
+cluster_sum <- aggregate(Cluster_perc ~ Cluster, data = temp, sum)
+
+organ_perc2_CD8 <- ggplot(temp, aes(x = Cluster, y = Freq, fill = Organ)) +
+    geom_bar(stat = "identity") + 
+    #geom_text(data = Cluster_perc, aes(x = Cluster, y = max(temp$Freq) + 50, label = paste0(round(Cluster_perc, 1), "%")),
+         #     position = position_dodge(width = 0.9), color = "black", size = 3) +
+    labs(title = "CD8 Clusters - Total Number by Organ",
+         x = "CD8 Cluster",
+         y = "Number of Cells",
+         fill = "Organ") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
+```
+
+# FIGURE 6 - CD8
+
+```{r}
+cd8_organ <- cowplot::plot_grid(organ_perc1_CD8, organ_perc2_CD8, ncol = 1, labels = c("D", "E"))
+
+
+cd8_organ_tsne <- DimPlot(seurat_object_CD8, group.by = "Organ", reduction = "tsne_cd8_") + ggtitle("CD8 TSNE by Organ") + NoLegend()
+
+```
+
+# 1.H Double Negative Cells in CD8 Object
+
+```{r}
+DefaultAssay(seurat_object) <- "ADT"
+
+# Double Negative Seurat
+seurat_object_double_neg <- subset(x = seurat_object, subset = CD8A < 0.75 & CD4 < 0.75)
+double_neg_barcodes <- seurat_object_double_neg$cell_barcode
+
+# Add Metadata
+seurat_object_CD8$double_neg <- seurat_object_CD8$cell_barcode %in% double_neg_barcodes
+table(seurat_object_CD8$double_neg)
+
+levels <- c("CD8+", "Double Negative")
+my_factor <- as.factor(seurat_object_CD8$double_neg)
+levels(my_factor) <- levels
+table(my_factor)
+
+seurat_object_CD8$double_neg <- my_factor
+
+dubneg_plot <- DimPlot(seurat_object_CD8, reduction = "tsne_cd8_", group.by = "CD8_clust_star", cols = CD8_colors, split.by = "double_neg") + ggtitle("CD4-/CD8- Cells") + NoLegend() +xlim(-40,45) + ylim(-40,45)
+dubneg_plot <- LabelClusters(plot = dubneg_plot, id = "CD8_clust_star", clusters = c("0*", "1*", "2*", "3*", "4*", "5*", "6*", "7*", "8*", "9*"), color = c("white", "white", "black", "black", "black", "white", "black", "white", "black", "white", "white", "white", "black", "black", "black", "white", "black", "white", "black", "white"), repel = TRUE, box = TRUE)
+
+blank <- ggplot() + theme_void()
+
+dubneg_plot2 <- cowplot::plot_grid(dubneg_plot, blank, rel_heights = c(1, 0.1), ncol = 1)
+```
+
+# Double Negative by Organ
+```{r}
+organ_table <- table(seurat_object_CD8$double_neg, seurat_object_CD8$Organ)
+barplot(organ_table, main = "CD4-/CD8- Cell Organ Distribution", xlab = "Organ", ylab = "Frequency", col = "skyblue")
+
+organ_infection_table <- table(seurat_object_CD8$Organ, seurat_object_CD8$Infection, seurat_object_CD8$double_neg)
+organ_infection_df <- as.data.frame(organ_infection_table)
+colnames(organ_infection_df) <- c("Organ", "Infection", "double_neg", "double_neg_count")
+
+# Calculate percentage
+organ_infection_df <- organ_infection_df %>%
+  group_by(Organ, Infection) %>%
+  mutate(percentage = double_neg_count / sum(double_neg_count) * 100)
+
+# Create barplot
+organ_dub_neg_plot <- ggplot(organ_infection_df, aes(x = Infection, y = percentage, fill = as.factor(double_neg))) +
+  geom_bar(stat = "identity") +
+  geom_label(aes(label = sprintf("%.1f%%", percentage), color = as.factor(double_neg)),
+               position = position_stack(vjust = 0.5), size = 3) +
+  geom_text(aes(label = sprintf("%.1f%%", percentage),
+                color = as.factor(double_neg)),
+            position = position_stack(vjust = 0.5),
+            size = 3, show.legend = FALSE) +
+  labs(title = "Percentage Double Negative cells (CD4-/CD8-) by Organ and Infection",
+       x = "Infection",
+       y = "Percentage",
+       fill = "Surface Marker Expression") +
+  scale_fill_manual(values = c("Double Negative" = "red", "CD8+" = "blue")) +
+  scale_color_manual(values = c("Double Negative" = "black", "CD8+" = "white")) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  facet_grid(Organ ~ ., scales = "free_y") + guides(color="none")
+
+```
+
+# Double Negative by Clust
+
+```{r}
+double_neg_perc <- as.data.frame(table(seurat_object_CD8$double_neg, seurat_object_CD8$CD8_clust_star))
+colnames(double_neg_perc) <- c("DoubleNeg", "Cluster", "Freq")
+
+double_neg_perc <- double_neg_perc %>%
+  group_by(Cluster) %>%
+  mutate(percentage = Freq / sum(Freq) * 100)
+
+double_neg_perc$Cluster <- factor(double_neg_perc$Cluster, levels = c("5*", "3*", "2*", "6*","8*", "4*", "9*", "7*", "0*", "1*"))
+
+# Create ggplot bar graph
+dub_neg_clust <- ggplot(double_neg_perc, aes(x = as.factor(Cluster), y = percentage, fill = as.factor(DoubleNeg))) +
+    geom_bar(stat = "identity") +
+    geom_label(aes(label = sprintf("%.1f%%", percentage), color = as.factor(DoubleNeg)),
+               position = position_stack(vjust = 0.5), size = 3) +
+    geom_text(aes(label = sprintf("%.1f%%", percentage), color = as.factor(DoubleNeg)),
+              position = position_stack(vjust = 0.5), size = 3, show.legend = FALSE) +  
+    labs(title = "Percentage of Double Negative (CD4-/CD8-) cells in each cluster",
+         x = "CD8 Cluster",
+         y = "Percentage", fill = "Surface Marker Expr") +
+    scale_fill_manual(values = c("Double Negative" = "red", "CD8+" = "blue")) +
+    scale_color_manual(values = c("Double Negative" = "black", "CD8+" = "white")) +
+    theme_minimal() +
+    theme(legend.position = "bottom") + guides(fill = guide_legend(override.aes = list(color = c("white", "black")) ))
+
+dub_neg_clust <- ggplot(double_neg_perc, aes(x = as.factor(Cluster), y = percentage, fill = as.factor(DoubleNeg))) +
+    geom_bar(stat = "identity") +
+    geom_label(aes(label = sprintf("%.1f%%", percentage), color = as.factor(DoubleNeg)),
+               position = position_stack(vjust = 0.5), size = 3) +
+    geom_text(aes(label = sprintf("%.1f%%", percentage), color = as.factor(DoubleNeg)),
+              position = position_stack(vjust = 0.5), size = 3, show.legend = FALSE) +  
+    labs(title = "Percentage of Double Negative (CD4-/CD8-) cells in each cluster",
+         x = "CD8 Cluster",
+         y = "Percentage", fill = "Surface Marker Expr") +
+    scale_fill_manual(values = c("Double Negative" = "red", "CD8+" = "blue"), guide = "legend") +
+    scale_color_manual(values = c("Double Negative" = "black", "CD8+" = "white"), guide = "legend") +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+
+```
+
+# FIGURE 2
+
+```{r}
+dub_neg_perc <- cowplot::plot_grid(organ_dub_neg_plot , dub_neg_clust, rel_heights = c(0.85,1), labels = c("B", "C"), ncol =1)
+
+final_dub_neg <- cowplot::plot_grid(dubneg_plot2, dub_neg_perc, labels = c("A", ""))
+
+```
+
+
+# Double Negative CD44 Expression
+
+```{r}
+VlnPlot(seurat_object_CD8, features = c("CD44"), group.by = "CD8_clust", split.by = "double_neg") +
+  ggtitle("Expression of CD44 in double_neg_clust Groups") +
+  theme_minimal()
+```
+
+# Setting CD8 Cluster Metadata
+```{r}
+seurat_object_CD8$CD8_clust <- seurat_object_CD8$RNA_snn_res.0.6
+```
+
+# Split by Mouse
+```{r}
+DimPlot(seurat_object_CD8, reduction = "umap_cd8_", label = FALSE, repel = TRUE, split.by = "Mouse_New", group.by = "CD8_clust")
+```
+
+# Split by Organ and Infection
+```{r}
+seurat_object_CD8$Inf_Organ <- paste0(seurat_object_CD8$Infection, "_", seurat_object_CD8$Organ)
+
+DimPlot(seurat_object_CD8, reduction = "umap_cd8_", label = FALSE, repel = TRUE, split.by = "Inf_Organ", ncol = 3)
+```
+
+# CD8 Cluster Frequency
+
+```{r}
+df_CD8_mouse <- table(seurat_object_CD8$Mouse_New, seurat_object_CD8$CD8_clust, seurat_object_CD8$Organ)
+
+temp <- as.data.frame(melt(df_CD8_mouse))
+colnames(temp) <- c("Mouse", "Cluster","Organ", "Freq")
+```
+
+
+```{r}
+ggplot(temp, aes(x = Mouse, y = Freq, color = Mouse)) +
+  geom_boxplot() +
+  labs(
+    x = "Cluster",
+    y = "Frequency",
+    title = "Boxplot of Frequency by Cluster and Condition") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_grid(Organ ~ Cluster) +
+  theme(legend.position = "top")
+```
+
+### UMAP PUBLICATION READY FIGURE
+
+
+# P1 UMAP FOR ALL
+```
+# Can use SCpubr if we'd like
+#p1 <- SCpubr::do_DimPlot(sample = seurat_object_CD8, reduction = "umap_CD8_", dims = c(2, 1), plot.axes = TRUE, legend.nrow = 7, label = TRUE, legend.position = "right")
+
+p1 <- DimPlot(seurat_object_CD8, reduction = "umap_CD8_", group.by = "CD8_clust", label = FALSE, label.size = 4, cols = CD8_colors) + ggtitle("All CD8 Cells") + xlim(-7,12) + geom_ellipse(aes(x0 = 7.5, y0 = -4.75, a = 1.5, b = 2.0, angle = 200, linetype = 2)) + geom_text()  
+```
+
+```{r}
+umap_data <- as.data.frame(seurat_object_CD8@reductions$umap_cd8_@cell.embeddings)
+umap_data$cluster <- seurat_object_CD8$CD8_clust
+
+# Create a basic DimPlot
+dim_plot_all <- ggplot(umap_data, aes(x = UMAP_1, y = UMAP_2, color = factor(cluster))) +
+    geom_point() +
+    scale_color_manual(values = CD8_colors, name = "CD8 Clusters") +  # Set custom colors and legend label
+    theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  # Remove grid lines
+    panel.background = element_blank(),  # Remove color background
+    axis.line = element_line(color = "black"),  # Keep axis lines
+    axis.ticks = element_line(color = "black"),  # Keep ticks
+    axis.text = element_text(color = "black"), # Set axis text color
+  legend.position = "bottom",  # Move legend to the bottom
+    legend.box = "horizontal"  # Set legend box style to horizontal
+  )
+
+# Add transparent stat_ellipse for Cluster 3
+p1 <- dim_plot_all 
+#+ 
+#    stat_ellipse(
+#        data = subset(umap_data, cluster == "4"),
+#        type = "norm", geom = "polygon", level = 0.95, alpha = 0.3
+#    ) +
+#    annotate("text", x = 10.75, y = -4.5, label = "Diff Abund", size = 5, color = "black") +
+#    labs(fill = NULL) +  # Remove ellipse legend
+#    guides(fill = guide_legend(override.aes = list(shape = 16)))
+```
+
+
+# P2 UMAP by Infection
+```{r}
+# Infection
+ob.list <- SplitObject(seurat_object_CD8, split.by = "Infection")
+
+pa_inf <- DimPlot(ob.list$Ca, reduction = "umap_CD8_", group.by = "CD8_clust", label = FALSE, label.size = 4, cols = CD8_colors) + ggtitle("Infected CD8 Cells") + NoLegend() + xlim(-7,12) + ylim(-6,5) + theme(
+    plot.title = element_text(size = 7, face = "bold"),
+    axis.title.x = element_blank(),  # Remove x-axis label
+    axis.title.y = element_blank()   # Remove y-axis label
+  )
+
+pb_inf <- DimPlot(ob.list$No, reduction = "umap_CD8_", group.by = "CD8_clust", label = FALSE, label.size = 4, cols = CD8_colors) + ggtitle("Non-infected CD8 Cells") + NoLegend() + xlim(-7,12) + ylim(-6,5) + theme(
+    plot.title = element_text(size = 7, face = "bold"),
+    axis.title.x = element_blank(),  # Remove x-axis label
+    axis.title.y = element_blank()   # Remove y-axis label
+  )
+
+grid_infection <- plot_grid(pa_inf, pb_inf, nrow = 1)
+```
+
+# P3 UMAP by Organ
+```{r}
+# Organ
+organ.list <- SplitObject(seurat_object_CD8, split.by = "Organ")
+
+pa_org <- DimPlot(organ.list$Colon, reduction = "umap_CD8_", group.by = "CD8_clust", label = FALSE, label.size = 4, cols = CD8_colors) + ggtitle("CD8 Cells in Colon") + NoLegend() + xlim(-7,12) + ylim(-6,5) + theme(
+    plot.title = element_text(size = 7, face = "bold"),
+    axis.title.x = element_blank(),  # Remove x-axis label
+    axis.title.y = element_blank()   # Remove y-axis label
+  )
+
+pb_org <- DimPlot(organ.list$Lung, reduction = "umap_CD8_", group.by = "CD8_clust", label = FALSE, label.size = 4, cols = CD8_colors) + ggtitle("CD8 Cells in Lung") + NoLegend() + xlim(-7,12) + ylim(-6,5) + theme(
+    plot.title = element_text(size = 7, face = "bold"),
+    axis.title.x = element_blank(),  # Remove x-axis label
+    axis.title.y = element_blank()   # Remove y-axis label
+  )
+
+pc_org <- DimPlot(organ.list$mLns, reduction = "umap_CD8_", group.by = "CD8_clust", label = FALSE, label.size = 4, cols = CD8_colors) + ggtitle("CD8 Cells in mLns") + NoLegend() + xlim(-7,12) + ylim(-6,5) + theme(
+    plot.title = element_text(size = 7, face = "bold"),
+    axis.title.x = element_blank(),  # Remove x-axis label
+    axis.title.y = element_blank()   # Remove y-axis label
+  )
+
+grid_organ <- plot_grid(pa_org, pb_org, pc_org, nrow = 1, rel_widths = 1.5)
+
+#p_organ_inf <- plot_grid(
+#  grid_organ,
+#  plot_grid(NULL, pa_inf, pb_inf, NULL, nrow = 1, rel_widths = c(0.75, 1.5, 1.5, 0.75)),
+#  nrow = 2
+#)
+
+p_organ_inf2 <- plot_grid(
+  grid_organ,
+  plot_grid(NULL, pa_inf, pb_inf, NULL, nrow = 1, rel_widths = c(0.25, 2.125, 2.125, 0.25)),
+  nrow = 2
+)
+```
+
+```{r}
+plot_grid(p1, p_organ_inf2, nrow = 1)
+```
+
+### TSNE PUBLICATION READY FIGURE
+
+
+# P1 TSNE FOR ALL
+```
+# Can use SCpubr if we'd like
+#p1 <- SCpubr::do_DimPlot(sample = seurat_object_CD8, reduction = "umap_CD8_", dims = c(2, 1), plot.axes = TRUE, legend.nrow = 7, label = TRUE, legend.position = "right")
+
+p1 <- DimPlot(seurat_object_CD8, reduction = "umap_CD8_", group.by = "CD8_clust", label = FALSE, label.size = 4, cols = CD8_colors) + ggtitle("All CD8 Cells") + xlim(-7,12) + geom_ellipse(aes(x0 = 7.5, y0 = -4.75, a = 1.5, b = 2.0, angle = 200, linetype = 2)) + geom_text()  
+```
+
+```{r}
+tsne_data <- as.data.frame(seurat_object_CD8@reductions$tsne_cd8_@cell.embeddings)
+tsne_data$cluster <- seurat_object_CD8$CD8_clust
+
+# Create a basic DimPlot
+dim_plot_all <- ggplot(tsne_data, aes(x = tSNE_1, y = tSNE_2, color = factor(cluster))) +
+    geom_point() +
+    scale_color_manual(values = CD8_colors, name = "CD8 Clusters") +  # Set custom colors and legend label
+    theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  # Remove grid lines
+    panel.background = element_blank(),  # Remove color background
+    axis.line = element_line(color = "black"),  # Keep axis lines
+    axis.ticks = element_line(color = "black"),  # Keep ticks
+    axis.text = element_text(color = "black"), # Set axis text color
+  legend.position = "bottom",  # Move legend to the bottom
+    legend.box = "horizontal"  # Set legend box style to horizontal
+  ) + guides(color = guide_legend(override.aes = list(shape = 16)))
+
+# Add transparent stat_ellipse for Cluster 4
+p1 <- dim_plot_all + 
+    guides(fill = guide_legend(override.aes = list(shape = 16)))
+```
+
+
+# P2 TSNE by Infection
+```{r}
+# Infection
+ob.list <- SplitObject(seurat_object_CD8, split.by = "Infection")
+
+pa_inf <- DimPlot(ob.list$Ca, reduction = "tsne_cd8_", group.by = "CD8_clust", label = FALSE, label.size = 4, cols = CD8_colors, pt.size = 0.5) + ggtitle("Infected CD8 Cells") + NoLegend() + xlim(-40,45) + ylim(-40,45) + theme(
+    plot.title = element_text(size = 7, face = "bold"),
+    axis.title.x = element_blank(),  # Remove x-axis label
+    axis.title.y = element_blank()   # Remove y-axis label
+  )
+
+pb_inf <- DimPlot(ob.list$No, reduction = "tsne_cd8_", group.by = "CD8_clust", label = FALSE, label.size = 4, cols = CD8_colors, pt.size = 0.5) + ggtitle("Non-infected CD8 Cells") + NoLegend() + xlim(-40,45) + ylim(-40,45) + theme(
+    plot.title = element_text(size = 7, face = "bold"),
+    axis.title.x = element_blank(),  # Remove x-axis label
+    axis.title.y = element_blank()   # Remove y-axis label
+  )
+
+pb_both <- DimPlot(seurat_object_CD8, reduction = "tsne_cd8_", group.by = "Organ", cols = c("red", "blue", "green"), pt.size = 0.5) + ggtitle("CD8 Cells grouped by Organ") + xlim(-40,45) + ylim(-40,45) + theme( plot.title = element_text(size = 7, face = "bold"),
+    axis.title.x = element_blank(),  # Remove x-axis label
+    axis.title.y = element_blank()   # Remove y-axis label
+  ) + NoLegend()
+
+grid_infection <- plot_grid(pa_inf, pb_inf, pb_both, labels = c("", "", "D"), nrow = 1)
+```
+
+# P3 TSNE by Organ
+```{r}
+# Organ
+organ.list <- SplitObject(seurat_object_CD8, split.by = "Organ")
+
+pa_org <- DimPlot(organ.list$Colon, reduction = "tsne_cd8_", group.by = "CD8_clust", label = FALSE, label.size = 4, cols = CD8_colors) + ggtitle("CD8 Cells in Colon") + NoLegend() + xlim(-40,45) + ylim(-40,45) + theme(
+    plot.title = element_text(size = 7, face = "bold"),
+    axis.title.x = element_blank(),  # Remove x-axis label
+    axis.title.y = element_blank()   # Remove y-axis label
+  )
+
+pb_org <- DimPlot(organ.list$Lung, reduction = "tsne_cd8_", group.by = "CD8_clust", label = FALSE, label.size = 4, cols = CD8_colors) + ggtitle("CD8 Cells in Lung") + NoLegend() + xlim(-40,345) + ylim(-40,45) + theme(
+    plot.title = element_text(size = 7, face = "bold"),
+    axis.title.x = element_blank(),  # Remove x-axis label
+    axis.title.y = element_blank()   # Remove y-axis label
+  )
+
+pc_org <- DimPlot(organ.list$mLns, reduction = "tsne_cd8_", group.by = "CD8_clust", label = FALSE, label.size = 4, cols = CD8_colors) + ggtitle("CD8 Cells in mLns") + NoLegend() + xlim(-40,45) + ylim(-40,45) + theme(
+    plot.title = element_text(size = 7, face = "bold"),
+    axis.title.x = element_blank(),  # Remove x-axis label
+    axis.title.y = element_blank()   # Remove y-axis label
+  )
+
+grid_organ <- plot_grid(pa_org, pb_org, pc_org, nrow = 1, rel_widths = 1.5)
+
+#p_organ_inf <- plot_grid(
+#  grid_organ,
+#  plot_grid(NULL, pa_inf, pb_inf, NULL, nrow = 1, rel_widths = c(0.75, 1.5, 1.5, 0.75)),
+#  nrow = 2
+#)
+
+p_organ_inf2 <- plot_grid(
+  grid_organ,
+  grid_infection,
+  nrow = 2
+, labels = c("B", "C"))
+```
+
+# FIGURE 4
+
+```{r}
+pub1 <- plot_grid(p1, p_organ_inf2, nrow = 1, rel_widths = c(0.75, 1.25), labels = c("A", NULL))
+pub1
+```
+
+
+# DENSITY PLOT
+
+```{r}
+library(cetcolor)
+
+pl1 <- DimPlot(seurat_object_CD8,  reduction = "umap_cd8_",
+                combine = FALSE, split.by = "Infection" # returns full ggplot object
+                , label = TRUE)
+
+# custom color scale
+scale.col <- cet_pal(16, name = "fire")
+
+# make plot
+pl1[[1]] & 
+  stat_density_2d(aes_string(x = "UMAP_1", y = "UMAP_2", fill = "after_stat(level)"), 
+                  linewidth = 0.2, geom = "density_2d_filled", 
+                  colour = "ivory", alpha = 0.4, n = 150, h = c(1.2, 1.2)) & 
+  scale_fill_gradientn(colours = scale.col) & 
+  DarkTheme()
+```
+
+
+# Expression of Cluster-specific markers
+
+```{r}
+adt_specific_markers <- c("CD8", "CD8A", "TCRB", "TCRGD", "CD84", "CD62L")
+rna_specific_markers <- c("Ccr7", "Foxp3", "Il17a", "Csf2", "Ifng", "Gzmb", "Tbx21", "Gata3", "Il5", "Il4") # Removes Il3 because level is 0 for all cells
+
+# Function to create FeaturePlot for a specific marker
+create_feature_plot <- function(marker) {
+  FeaturePlot(seurat_object_CD8, features = marker, reduction = "tsne_CD8_", cols = c("yellow", "red")) + NoLegend() + theme(
+    plot.title = element_text(size = 7, face = "bold"),
+    axis.title.x = element_blank(),  # Remove x-axis label
+    axis.title.y = element_blank()   # Remove y-axis label
+  )
+}
+
+# Use lapply to create a list of plots for each feature
+DefaultAssay(seurat_object_CD8) <- "ADT"
+feature_plots_list_ADT <- lapply(adt_specific_markers, create_feature_plot)
+
+DefaultAssay(seurat_object_CD8) <- "RNA"
+feature_plots_list_RNA <- lapply(rna_specific_markers, create_feature_plot)
+
+feature_plots_all <- c(feature_plots_list_ADT, feature_plots_list_RNA)
+```
+
+```{r}
+feature_grid_plot <- plot_grid(plotlist = feature_plots_all, ncol = 4)
+```
+
+```{r}
+pub2 <- plot_grid(feature_grid_plot, final_abundance_graph, nrow = 1)
+pub2_o2 <- plot_grid(feature_grid_plot, final_abundance_graph_opt2, nrow = 1)
+```
+
+```{r}
+pub_both <- plot_grid(pub1, pub2, nrow = 2)
+```
+
+
+# Save RDS
+```{r}
+saveRDS(seurat_object_CD8, file = paste0(data_dir, "/CD8_data/seurat_object_CD8.rds"))
+
+
+```

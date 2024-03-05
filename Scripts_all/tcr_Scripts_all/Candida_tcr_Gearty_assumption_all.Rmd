@@ -1,0 +1,440 @@
+---
+title: "Candida_tcr_Gearty_assumption"
+author: "Nathan Morris"
+date: "2023-10-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Directory Set Up
+
+```{r}
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+```
+
+Here, we use the pre-existing seurat object.
+```{r}
+seurat_object_unfiltered <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT.Rds"))
+
+#seurat_object_WNN <- readRDS("Candida_ds_clean_WNN.rds") # I didn't include WNN analysis in this document
+#seurat_object <- readRDS(file = paste0(data_dir, "dataset_post_sc_Analysis.rds")) #If you want without WNN Clusters and without TCR Information
+
+seurat_object_pseudo <- readRDS(file = paste0(data_dir, "pseudotime_seurat.rds"))
+```
+
+# Load Packages
+
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+library(ggplot2)
+library(Seurat)
+library(tibble)
+library(dplyr)
+library(pheatmap)
+library(tidyr)
+library(usedist)
+library(ggvenn)
+library(stringdist)
+library(patchwork)
+library(djvdj)
+library(data.table)
+```
+
+
+# Gearty Assumption Implementation and Analysis
+https://github.com/abcwcm/GeartySchietinger/blob/master/scRNAseq/processingVDJseq.md
+https://github.com/abcwcm/GeartySchietinger/blob/master/scRNAseq/figures_VDJseq.Rmd
+
+```{r}
+# We are reading in the raw data
+
+tcrfile <- "filtered_contig_annotations.csv"
+vdj_dirs <- ("/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/TCR_data")
+tcr_new <- fread(paste0(vdj_dirs,tcrfile))
+tcr.df <- import_vdj(vdj_dir = vdj_dirs)
+tcr.df$Barcode <- gsub(".*_[134]_","", rownames(tcr.df))
+
+# Use Seurat Object to get the Mouse/Sample Information
+seurat_object_temp1 <- seurat_object_pseudo
+temp <- as.vector(paste(colnames(seurat_object_temp1), "-1", sep=""))
+new_names <- substr(temp, start = 7, stop = nchar(temp))
+
+# Rename Seurat Cells to match the VDJ Barcodes
+seurat_object_temp1 <- RenameCells(seurat_object_temp1, new.names = new_names)
+seurat_object_temp1$cell_barcode <- new_names
+
+# Remove cells without mouse/sample info - not in Seurat Object
+tcr.df <- subset(tcr.df, Barcode %in% seurat_object_temp1$cell_barcode)
+
+ok <- data.frame(
+  Barcode = seurat_object_temp1$cell_barcode,  
+  Organ = seurat_object_temp1$Organ, 
+  Mouse = seurat_object_temp1$Mouse)
+
+# Merging to get metadata for Organ and Mouse
+tcr.cells <- as.data.table(tcr.df)[ok, on = .(Barcode)]
+tcr.cells <- tcr.cells[!is.na(clonotype_id)]
+
+# Clonotype IDs
+cl.ids <- tcr.cells[, c("cdr3_nt","Mouse"), with=FALSE] %>% unique
+cl.ids[, clono.ID := paste0("cid",1:nrow(cl.ids))] # Equivalent to making cl.ids$clono.ID
+
+# Lengths check for duplicates
+nrow(cl.ids) # There are 10095 unique cl.ids
+nrow(tcr.cells) # There are 10261 cells with TCR information and RNA information
+
+# Transfer the clonotype IDs to the tcr.cells dataframe based on the cdr3_nt and Mouse
+tcr.cells <- cl.ids[tcr.cells, on = c("cdr3_nt","Mouse")]
+#length(unique(tcr.cells$clono.ID)) # There are the unique IDs within each cell, there are still 10095 unique IDs
+
+# Add TRA and TRB Columns
+process_column <- function(df, TR) {
+  case_when(
+    TR == "TRA" ~
+      case_when(
+        df$chains == "TRA" ~ df$cdr3,
+        df$chains == "TRA;TRB" ~ sub(";.*", "", df$cdr3),
+        df$chains == "TRB" ~ "noProperPair",
+        TRUE ~ "multipleTRs"
+      ),
+    TR == "TRB" ~
+      case_when(
+        df$chains == "TRB" ~ df$cdr3,
+        df$chains == "TRA;TRB" ~ sub(".*;", "", df$cdr3),
+        df$chains == "TRA" ~ "noProperPair",
+        TRUE ~ "multipleTRs"
+      ),
+    TRUE ~ "unknownTR"
+  )
+}
+
+tcr.cells$TRA <- process_column(tcr.cells, "TRA")
+tcr.cells$TRB <- process_column(tcr.cells, "TRB")
+```
+
+Comparing the Gearty analysis to our so far, we do not have the TRA != "noProperPair" and TRB != "noProperPair" columns in our tcr.cells dataframe. I'm unsure how they got this column, as it doesn't seem to be from merging the dataframes or from the import VDJ function. https://github.com/abcwcm/GeartySchietinger/blob/master/scRNAseq/processingVDJseq.md
+
+They reference "proper Pair" multiple times. For this, I'm assuming that the proper pair means a TRA/TRB combination?
+```
+## Assign new clonotype IDs that collapse single-TRAs and single-TRBs
+## with cells that show the same TRA or TRB in a proper pair
+## because it is highly likely that we've just missed one of the chains
+## for some cells [also, I'll focus on single-TRAs/TRBs that aren't found in
+## multiple pairings ("monogamous") and are also not present in "wrong" pairs 
+## such as TRA;TRA;TRB 
+## This strategy isn't 1000% clean and possibly too strict, but it should give
+## us a less restricted set than completely ignoring the fact that the single 
+## TRA/TRB instances are probably represented in proper TRA;TRB pairs, too
+
+traStatus <- lapply(unique(tcr.cells$Mouse), function(x){
+    tmp2 <- unique(tcr.cells[Mouse==x & chains %in% c("TRA","TRB","TRA;TRB") & TRA != "noProperPair",
+        c("Mouse","chains","cdr3","cdr3_nt","TRA","TRB")])
+    tmp <- tcr.cells[Mouse==x, c("Mouse","chains","cdr3_nt")] %>% unique
+    data.table(TRA = tmp2$TRA, Mouse = tmp2$Mouse,
+    inFringeCases.TRA = unlist(lapply(tmp2$TRA, function(y) any(grepl(y, unique(tmp[!chains %in% c("TRA","TRB","TRA;TRB")]$cdr3_nt)))))) %>% unique
+}) %>% rbindlist
+```
+
+```{r}
+tcr.cells$clono.ID_new <- tcr.cells$clono.ID
+
+result_list <- list()
+
+for (x in unique(tcr.cells$Mouse)) {
+  tcr_subset <- tcr.cells[tcr.cells$Mouse == x, ]
+  
+  # Unpaired TCRs (TRA or TRB only)
+  df_unpaired <- tcr_subset[tcr_subset$paired == "FALSE" & tcr_subset$n_chains == "1", ]
+  
+  # For each unpaired subset, check if there are matching TRA or TRB depending on which
+  TRA_df <- df_unpaired[df_unpaired$TRB == "noProperPair", ]
+  TRB_df <- df_unpaired[df_unpaired$TRA == "noProperPair", ]
+  
+  TRA_clonos <- TRA_df$TRA
+  TRB_clonos <- TRB_df$TRB
+  
+  # Process TRA clonos
+  for (y in TRA_clonos) {
+    new_IDS <- tcr_subset[tcr_subset$TRA == y, ]$clono.ID
+    tcr_subset[tcr_subset$TRA == y, ]$clono.ID_new <- new_IDS[1]
+  }
+  
+  # Process TRB clonos
+  for (y in TRB_clonos) {
+    new_IDS <- tcr_subset[tcr_subset$TRB == y, ]$clono.ID
+    tcr_subset[tcr_subset$TRB == y, ]$clono.ID_new <- new_IDS[1]
+  }
+  
+  # Store the result in the list
+  result_list[[paste(x, "_tcr_subset")]] <- tcr_subset
+}
+```
+
+```
+tcr.cells$clono.ID_new <- tcr.cells$clono.ID
+
+for (x in unique(tcr.cells$Mouse)){
+  tcr_subset <- tcr.cells[tcr.cells$Mouse == x,]
+  # Vector of unpaired cdr3
+  vector_unpaired <- tcr_subset[paired == "FALSE",]$cdr3
+  # Vector of paired cdr3, only checking ones that are unpaired to the correct pairs- one of each (TRA/TRB)
+  vector_paired <- tcr_subset[paired == "TRUE" & chains == "TRA;TRB",]$cdr3
+  # If unpaired in paired, TRUE
+  result <- sapply(vector_unpaired, function(x) any(grepl(x, vector_paired)))
+  # Get all true names
+  true_names <- names(result[result == TRUE])
+  temp <- sapply(true_names, function(x) which(grepl(x, tcr_subset$cdr3)))
+  #print(head(temp))
+  # For the cdr3 in temp, make it so each column has a new cl.ids
+  for (cdr3 in seq(1:length(true_names))){
+    #temp$true_names
+    positions <- unlist(temp[cdr3])
+    #print(tcr_subset[as.numeric(unlist(strsplit(positions, " "))),])
+    #print(tcr_subset[positions,])
+    clono_list <- tcr_subset[positions,]$clono.ID
+    #print(clono_list)
+    #print(clono_list)
+    tcr_subset[positions, "clono.ID_new"] <- clono_list[1]
+  }
+  assign(paste(x, "_tcr_subset"), tcr_subset)
+}
+```
+
+Combining the three mouse datasets with the unique TCRs
+
+```{r}
+mouse_combined <- rbind(result_list$`mouse0082 _tcr_subset`, result_list$`mouse0081 _tcr_subset`, result_list$`mouse0080 _tcr_subset`)
+
+head(rev(sort(table(mouse_combined$clono.ID_new))))
+
+merge_temp <- data.frame(Barcode =  seurat_object_temp1$cell_barcode, RNA_cluster = seurat_object_temp1$RNA_clusters)
+
+mouse_combined <- merge(mouse_combined, merge_temp, by = "Barcode", all.x = TRUE)
+```
+
+Therefore, the maximum proliferated cells in any individual mouse, or cells with the same clonotype, is 25.
+
+
+Venn Diagram using data with the assumptions
+
+```{r}
+mice <- c("mouse0082", "mouse0080", "mouse0081")
+
+for (mouse in mice){
+  tcr_mouse <- mouse_combined[mouse_combined$Mouse == mouse,]
+  tmp_list <- list(
+    Lung_m0 <- na.omit(tcr_mouse[tcr_mouse$Organ == "Lung",]$clono.ID_new),
+    Colon_m0 <- na.omit(tcr_mouse[tcr_mouse$Organ == "Colon",]$clono.ID_new),
+    mlns_m0 <- na.omit(tcr_mouse[tcr_mouse$Organ == "mLns",]$clono.ID_new) )
+  names(tmp_list) <-  c("Lung", "Colon", "mLns")
+  assign(paste0("x_new_", mouse), tmp_list)
+}
+```
+
+```{r}
+p0 <- ggvenn(
+  x_new_mouse0080, 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF"),
+  stroke_size = 0.5, set_name_size = 3
+  ) +   ggtitle("Infected Male")
+
+#Reduce(intersect,  x_m0)
+#intersect(x_m0$mLns, x_m0$Colon)
+
+p1 <- ggvenn(
+  x_new_mouse0081, 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF"),
+  stroke_size = 0.5, set_name_size = 3
+  ) +   ggtitle("Infected Female")
+
+#Reduce(intersect,  x_m1)
+
+p2 <- ggvenn(
+  x_new_mouse0082, 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF"),
+  stroke_size = 0.5, set_name_size = 3
+  ) +   ggtitle("Non-infected Male")
+
+#Reduce(intersect,  x_m2)
+```
+
+```{r}
+all_plots <- p0 + p1 + p2
+plot <- all_plots + plot_annotation(title = "Shared Clonotypes between Organs for each Mouse with Gearty TRA/TRB Assumption")
+plot
+```
+
+# Paired and Duplicate Results Gearty
+
+```{r}
+paired <- mouse_combined %>%
+    group_by(clono.ID_new, Mouse) %>%
+    dplyr::filter(n_distinct(Organ) > 1)
+
+duplicate_clonotypes <- mouse_combined %>%
+  group_by(clono.ID_new, Mouse) %>%
+  dplyr::filter(n_distinct(Barcode) > 1)
+```
+
+```{r}
+length(unique(paired$clono.ID_new))
+head(rev(sort(table(paired$clono.ID_new))))
+```
+Therefore, by using the Gearty assumption, there are 99 different clonotypes that are paired across Organs (same as adding up all the common clonotypes from the venn diagram above), and within this the maximum number of cells that have proliferated and are found in multiple organs is 11.
+
+Duplicate:
+
+```{r}
+length(unique(duplicate_clonotypes$clono.ID_new))
+head(rev(sort(table(duplicate_clonotypes$clono.ID_new))))
+```
+
+However, here we show that the most common clonotype is found in mouse0082 and in the Non-infected mouse.
+Can't run this, can only run it after the whole markdown is run.
+```
+table(so_vdj$Mouse[so_vdj@meta.data[["clono.id_new"]] == "cid1173"])
+table(so_vdj$Infection[so_vdj@meta.data[["clono.id_new"]] == "cid1173"])
+```
+
+```{r}
+table(duplicate_clonotypes$RNA_cluster[duplicate_clonotypes$clono.ID_new == "cid1173"])
+
+```
+
+# Graph for Gearty
+
+# Paired
+
+```{r}
+mice <- c("mouse0082", "mouse0080", "mouse0081")
+
+dataframes_list_Gearty <- list()
+
+#mouse_combined
+#paired
+
+for (mouse in mice){
+  tmp_df2 <- as.data.frame(paired[paired$Mouse == mouse,])
+  new_list <- list()
+  for (row in seq(1:nrow(tmp_df2))){
+    clonotype <- tmp_df2[row, ]$clono.ID_new
+    clusters_per_clonotype <- length(unique(tmp_df2[tmp_df2$clono.ID_new == clonotype, ]$RNA_cluster))
+    n_organs_per_clonotype <- length(unique(tmp_df2[tmp_df2$clono.ID_new == clonotype, ]$Organ))
+    tmp_df2[row, "clusters_per_clonotype"] <- paste(tmp_df2[tmp_df2$clono.ID_new == clonotype, ]$RNA_cluster, collapse = ", ")
+    tmp_df2[row, "n_clusters_per_clonotype"] <- clusters_per_clonotype
+    tmp_df2[row, "n_organs_per_clonotype"] <- n_organs_per_clonotype
+  }
+  tmp_df2$n_clusters_per_clonotype <- as.factor(tmp_df2$n_clusters_per_clonotype)
+  tmp_df2$n_organs_per_clonotype <- as.factor(tmp_df2$n_organs_per_clonotype)
+  dataframes_list_Gearty[[mouse]] <- tmp_df2
+}
+```
+
+```{r}
+df_gearty <- dataframes_list_Gearty$mouse0082
+df_gearty <- rbind(df_gearty, dataframes_list_Gearty$mouse0080)
+df_gearty <- rbind(df_gearty, dataframes_list_Gearty$mouse0081)
+
+df_gearty <- df_gearty %>%
+  mutate(Mouse_New = ifelse(Mouse == "mouse0080", "Candida Infected Male", ifelse(Mouse == "mouse0081", "Candida Infected Female", ifelse(Mouse == "mouse0082", "No Infection Male", Mouse))))
+
+df_gearty <- df_gearty %>%
+  mutate(Infection = ifelse(Mouse == "mouse0080", "Yes", ifelse(Mouse == "mouse0081", "Yes", ifelse(Mouse == "mouse0082", "No", Mouse))))
+
+df_gearty$RNA_cluster <- as.factor(df_gearty$RNA_cluster)
+
+#ggplot(df, aes(x = RNA_clusters, fill= n_clusters_per_clonotype)) + 
+#  geom_bar(aes(fill = n_clusters_per_clonotype), colour = "grey") +
+#  theme_minimal() +
+#  labs(x = "RNA Clusters", y = "Number of Cells") +
+#  facet_grid(. ~ Infection, scales = "free_x", space = "free_x")  # Remove the fill legend
+
+ggplot(df_gearty, aes(x=reorder(RNA_cluster, -table(RNA_cluster)[RNA_cluster]), fill= n_organs_per_clonotype)) + 
+  geom_bar(aes(fill = n_organs_per_clonotype)) +
+  labs(x = "RNA Clusters", y = "Number of Cells", fill = "Number of Organs per Clonotype") +
+  facet_grid(. ~ Mouse_New, scales = "free_x", space = "free_x") +  # Remove the fill legend
+  ggtitle("Gearty Duplicate Cells by Mouse and Number of Organs")
+
+ggplot(df_gearty, aes(x=reorder(RNA_cluster, -table(RNA_cluster)[RNA_cluster]), fill= n_organs_per_clonotype)) + 
+  geom_bar(aes(fill = n_organs_per_clonotype)) +
+  labs(x = "RNA Clusters", y = "Number of Cells", fill = "Number of Organs per Clonotype") +
+  facet_grid(. ~ Infection, scales = "free_x", space = "free_x") +  # Remove the fill legend
+  ggtitle("Gearty Duplicate Cells by Infection and Number of Organs")
+
+ggplot(df_gearty, aes(x=reorder(RNA_cluster, -table(RNA_cluster)[RNA_cluster]), fill= n_clusters_per_clonotype)) + 
+  geom_bar(aes(fill = n_clusters_per_clonotype)) +
+  labs(x = "RNA Clusters", y = "Number of Cells", fill = "Number of Clusters per Clonotype") +
+  facet_grid(. ~ Mouse_New, scales = "free_x", space = "free_x") +  # Remove the fill legend
+  ggtitle("Gearty Duplicate Cells by Mouse and Number of Clusters")
+
+ggplot(df_gearty, aes(x=reorder(RNA_cluster, -table(RNA_cluster)[RNA_cluster]), fill= n_clusters_per_clonotype)) + 
+  geom_bar(aes(fill = n_clusters_per_clonotype)) +
+  labs(x = "RNA Clusters", y = "Number of Cells", fill = "Number of Clusters per Clonotype") +
+  facet_grid(. ~ Infection, scales = "free_x", space = "free_x") +  # Remove the fill legend
+  ggtitle("Gearty Duplicate Cells by Infection and Number of Clusters")
+```
+
+# Gearty Duplicate Graph
+
+```{r}
+mice <- c("mouse0082", "mouse0080", "mouse0081")
+
+dataframes_list_Gearty <- list()
+
+#mouse_combined
+# Duplicate
+
+for (mouse in mice){
+  tmp_df2 <- as.data.frame(duplicate_clonotypes[duplicate_clonotypes$Mouse == mouse,])
+  new_list <- list()
+  for (row in seq(1:nrow(tmp_df2))){
+    clonotype <- tmp_df2[row, ]$clono.ID_new
+    clusters_per_clonotype <- length(unique(tmp_df2[tmp_df2$clono.ID_new == clonotype, ]$RNA_cluster))
+    n_organs_per_clonotype <- length(unique(tmp_df2[tmp_df2$clono.ID_new == clonotype, ]$Organ))
+    tmp_df2[row, "clusters_per_clonotype"] <- paste(tmp_df2[tmp_df2$clono.ID_new == clonotype, ]$RNA_cluster, collapse = ", ")
+    tmp_df2[row, "n_clusters_per_clonotype"] <- clusters_per_clonotype
+    tmp_df2[row, "n_organs_per_clonotype"] <- n_organs_per_clonotype
+  }
+  tmp_df2$n_clusters_per_clonotype <- as.factor(tmp_df2$n_clusters_per_clonotype)
+  tmp_df2$n_organs_per_clonotype <- as.factor(tmp_df2$n_organs_per_clonotype)
+  dataframes_list_Gearty[[mouse]] <- tmp_df2
+}
+```
+
+```{r}
+df_gearty <- dataframes_list_Gearty$mouse0082
+df_gearty <- rbind(df_gearty, dataframes_list_Gearty$mouse0080)
+df_gearty <- rbind(df_gearty, dataframes_list_Gearty$mouse0081)
+
+df_gearty <- df_gearty %>%
+  mutate(Mouse_New = ifelse(Mouse == "mouse0080", "Candida Infected Male", ifelse(Mouse == "mouse0081", "Candida Infected Female", ifelse(Mouse == "mouse0082", "No Infection Male", Mouse))))
+
+df_gearty <- df_gearty %>%
+  mutate(Infection = ifelse(Mouse == "mouse0080", "Yes", ifelse(Mouse == "mouse0081", "Yes", ifelse(Mouse == "mouse0082", "No", Mouse))))
+
+#ggplot(df, aes(x = RNA_clusters, fill= n_clusters_per_clonotype)) + 
+#  geom_bar(aes(fill = n_clusters_per_clonotype), colour = "grey") +
+#  theme_minimal() +
+#  labs(x = "RNA Clusters", y = "Number of Cells") +
+#  facet_grid(. ~ Infection, scales = "free_x", space = "free_x")  # Remove the fill legend
+
+ggplot(df_gearty, aes(x = reorder(RNA_cluster, -table(RNA_cluster)[RNA_cluster]), fill= n_organs_per_clonotype)) + 
+  geom_bar(aes(fill = n_organs_per_clonotype), colour = "grey") +
+  theme_minimal() +
+  labs(x = "RNA Clusters", y = "Number of Cells") +
+  facet_grid(. ~ Mouse_New, scales = "free_x", space = "free_x") +  # Remove the fill legend
+  ggtitle("Gearty Duplicate Cells by Mouse and Number of Organs")
+
+ggplot(df_gearty, aes(x = reorder(RNA_cluster, -table(RNA_cluster)[RNA_cluster]), fill= n_clusters_per_clonotype)) + 
+  geom_bar(aes(fill = n_clusters_per_clonotype), colour = "grey") +
+  theme_minimal() +
+  labs(x = "RNA Clusters", y = "Number of Cells") +
+  facet_grid(. ~ Mouse_New, scales = "free_x", space = "free_x") +  # Remove the fill legend
+  ggtitle("Gearty Duplicate Cells by Mouse and Number of Clusters")
+```
+
+
