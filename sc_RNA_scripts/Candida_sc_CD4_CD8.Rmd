@@ -526,7 +526,7 @@ ggsave(filename = paste0(fig_directory, "figure_3.pdf"), plot = fig3, device = "
 ggsave(filename = paste0(fig_directory, "figure_3.jpeg"), plot = fig3, device = "jpeg", height = 14, width = 14)
 ```
 
-# Supplemental Figure 2
+# Supplemental Figure 3
 
 ```{r}
 g4 <- ElbowPlot(seurat_object_CD4, ndims = 50) + geom_vline(xintercept = 15, linetype = "dashed", color = "red", size = 1.5) + ggtitle("CD4 Elbow Plot")
