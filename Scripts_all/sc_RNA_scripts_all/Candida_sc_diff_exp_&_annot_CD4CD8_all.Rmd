@@ -1,0 +1,1573 @@
+---
+title: "Candida_sc_diff_exp_&_annot"
+author: "Nathan Morris"
+date: "2024-01-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = getwd())
+```
+
+### Data Import
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+# Data Import
+library(Seurat)
+library(scater)
+library(dplyr)
+library(SingleR)
+library(celldex)
+library(scRNAseq)
+library(scran)
+library(gridExtra)
+library(pheatmap)
+library(ess)
+library(reshape2)
+library(ggpubr)
+library(scCustomize)
+library(gridExtra)
+library(monocle3)
+library(reticulate)
+library(scCustomize)
+library(cowplot)
+```
+
+```{r}
+## For Reticulate (Python-R wrapper)
+conda_list()
+use_condaenv("r-reticulate")    #activate an environment e.g py2_env
+py_install("opentsne")
+reticulate::py_install("phate", pip=TRUE)
+devtools::install_github("KrishnaswamyLab/phateR")
+py_install("fa2")
+
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+```
+
+# Visualizing both CD4 and CD8 Numbered Clusters in Joined Seurat Object
+
+```{r}
+seurat_object_CD8$CD8_clust_star <- paste0(seurat_object_CD8$CD8_clust, "*")
+
+CD8_clust_num <- as.data.frame(seurat_object_CD8$CD8_clust)
+colnames(CD8_clust_num) <- c("CD8_clust_num")
+CD8_clust_num$CD8_clust_num_new <- paste0(CD8_clust_num$CD8_clust_num, "*")
+
+colnames(CD8_clust_num) <- c("clust_num_old", "clust_num")
+CD8_clust_num$barcodes <- rownames(CD8_clust_num)
+
+CD8_clust_num <- CD8_clust_num[, !(names(CD8_clust_num) == "clust_num_old")]
+
+colnames(CD4_clust_num) <- c("clust_num")
+CD4_clust_num$barcodes <- rownames(CD4_clust_num)
+
+all_clust_num <- rbind(CD4_clust_num, CD8_clust_num)
+all_clust_num$barcodes <- rownames(all_clust_num)
+
+saveRDS(all_clust_num, file = paste0(data_dir, "/all_clust_numbers.rds"))
+
+merged_data <- merge(seurat_object@meta.data, all_clust_num, by.x = "cell_barcode", by.y = "barcodes", all.x = TRUE)
+
+seurat_object$clust_num <- merged_data$clust_num
+```
+
+# Figure 1A
+
+```{r}
+DimPlot(seurat_object, reduction = "umap_both_", group.by = "clust_num", label = TRUE, repel = TRUE, label.box = TRUE)
+DimPlot(seurat_object, reduction = "umap_both_", group.by = "clust_num", split.by = "Infection") + NoLegend()
+
+DimPlot(seurat_object, reduction = "tsne_both_", group.by = "clust_num", label = TRUE, repel = TRUE, label.box = TRUE)
+
+
+```
+
+
+# 1. CD4
+
+```{r}
+seurat_object_CD4 <- readRDS(file = paste0(data_dir, "/CD4_data/seurat_object_CD4.rds"))
+```
+
+```
+# Find markers for all CD4 clusters
+
+Idents(seurat_object_CD4) <- "CD4_clust"
+DefaultAssay(object = seurat_object_CD4) <- "RNA"
+
+seurat_object_CD4.RNAmarkers_pos <- FindAllMarkers(seurat_object_CD4, only.pos = TRUE, min.pct = 0.10, logfc.threshold = 0.25)
+
+seurat_object_CD4.RNAmarkers_all <- FindAllMarkers(seurat_object_CD4, min.pct = 0.10, logfc.threshold = 0.25)
+
+seurat_object_CD4.RNAmarkers_down <- FindAllMarkers(seurat_object_CD4, only.pos = TRUE, min.pct = 0.10, logfc.threshold = 0.25, max.cells.per.ident = 50)
+
+saveRDS(seurat_object_CD4.RNAmarkers_pos, file = paste0(data_dir,"/CD4_data/cd4_T_cell_cluster_dge.rds"), ascii = FALSE, version = NULL, compress = TRUE, refhook = NULL)
+
+saveRDS(seurat_object_CD4.RNAmarkers_all, file = paste0(data_dir,"/CD4_data/cd4_T_cell_cluster_dge_all.rds"), ascii = FALSE, version = NULL, compress = TRUE, refhook = NULL)
+
+# Extract Top Genes
+result <- seurat_object_CD4.RNAmarkers_pos %>%
+  arrange(cluster, p_val_adj) %>%
+  group_by(cluster) %>% slice_head(n=5)
+
+cd4_t_cell_top_5_df <- Extract_Top_Markers(marker_dataframe = seurat_object_CD4.RNAmarkers_pos, num_genes = 5, data_frame = TRUE,
+    rank_by = "avg_log2FC", named_vector = FALSE, make_unique = TRUE)
+
+saveRDS(cd4_t_cell_top_5_df, file = paste0(data_dir,"/CD4_data/cd4_T_cell_cluster_top5_genes.rds"), ascii = FALSE, version = NULL,
+        compress = TRUE, refhook = NULL)
+```
+
+# 1.A CD4 Volcano Plots
+https://bioconductor.org/packages/release/bioc/vignettes/EnhancedVolcano/inst/doc/EnhancedVolcano.html
+
+```{r}
+cd4_t_cell_marker_all <- readRDS(paste0(data_dir,"/CD4_data/cd4_T_cell_cluster_dge_all.rds"))
+cd4_t_cell_marker_up <- readRDS(paste0(data_dir,"/CD4_data/cd4_T_cell_cluster_dge.rds"))
+
+```
+
+3892 unique differentially expressed genes
+
+```
+length(unique(cd4_t_cell_marker$gene))
+table(table(cd4_t_cell_marker$gene))
+```
+
+```{r}
+library(EnhancedVolcano)
+volcano_list <- list()
+for (clust in unique(cd4_t_cell_marker_all$cluster)){
+  res <- cd4_t_cell_marker_all[cd4_t_cell_marker_all$cluster == clust,]
+  print(clust)
+  top_genes <- head(res[order(-res$avg_log2FC), ], 10)
+  bottom_genes <- tail(res[order(res$avg_log2FC), ], 10)
+  selected_genes <- rbind(top_genes, bottom_genes)
+  selected_gene_names <- selected_genes$gene
+  volcano_list[[clust]] <- EnhancedVolcano(res,
+    lab = res$gene,
+    x = 'avg_log2FC',
+    y = 'p_val_adj', axisLabSize = 6, titleLabSize = 8, title = paste0("Cluster ",clust), subtitle = NULL,  captionLabSize = 6, labSize = 3, drawConnectors = TRUE,
+    widthConnectors = 0.5,
+    colConnectors = 'black') + NoLegend()
+  #, selectLab = selected_gene_names,
+}
+```
+
+```{r}
+volcano_grid_plot_cd4 <- cowplot::plot_grid(plotlist = volcano_list, ncol = 4)
+```
+
+# 1.A-2 Fig 4 - Marker Proteins and Up DEGs per Cluster
+
+```{r}
+library(paletteer)
+library(cowplot)
+library(SCpubr)
+
+CD4_colors <- c("#373634", "#F7B6D2", "#F8EED1", "#14FFB1", "purple" ,paletteer_d("ggthemes::calc"))
+```
+
+# TSNE AND FEAT PLOT
+
+```{r}
+create_feature_plot_CD4 <- function(marker) {
+  FeaturePlot(seurat_object_CD4, features = marker, reduction = "tsne_cd4_", cols = c("yellow", "red")) + NoLegend() + theme(
+    plot.title = element_text(size = 7, face = "bold"),
+    axis.title.x = element_blank(),  # Remove x-axis label
+    axis.title.y = element_blank()   # Remove y-axis label
+  )
+}
+
+# Use lapply to create a list of plots for each feature
+DefaultAssay(seurat_object_CD4) <- "ADT"
+features_cd4_adt <- c("CD44", "CD62L", "TCRB")
+feature_plots_list_adt <- lapply(features_cd4_adt, create_feature_plot_CD4)
+
+DefaultAssay(seurat_object_CD4) <- "RNA"
+features_cd4_rna <- c("Foxp3", "Tbx21", "Il17a", "Rorc", "Ccr6", "Ccr7", "Gata3", "Il4", "Il10", "Lef1", "Sell", "Ccl5", "Ddit4")
+feature_plots_list_rna <- lapply(features_cd4_rna, create_feature_plot)
+
+
+feature_plots_all <- c(feature_plots_list_adt, feature_plots_list_rna)
+
+feature_grid_plot <- plot_grid(plotlist = feature_plots_all, ncol = 4)
+
+
+CD4_colors_annot <- CD4_colors[c(1,2, 4:17)]
+cd4_plot_annot <- DimPlot(seurat_object_CD4, reduction = "tsne_cd4_", group.by = "CD4_clust_annot", cols = CD4_colors_annot, pt.size = 1) + ggtitle("CD4+ Cell Types") + NoLegend()
+cd4_plot_annot <- LabelClusters(plot = cd4_plot_annot, id = "CD4_clust_annot", clusters = c("Naive CD4+ Lung", "Naive CD4+ mLns", "Naive CD4+ Colon",  "Naive CD4+ Colon/Lung", "Treg/Th2 CD4+ Colon/Lung", "Th17 CD4", "Tfh CD4+ mLns", "Effector CD4+ Lung", "Treg CD4+ mLns", "Th1/NK", "Naive Treg CD4+ Lung","Effector CD4+ Lung/Colon", "Id3+ CD4+ mLns","Ifng Induced CD4+", "Prolif CD4+ Lung", "Arhgap15+ CD4+ mLns"), color = c("white", "black", "black", "black", "white", "black", "black", "black", "white", "black", "white", "black", "white", "black", "white", "black"), repel = TRUE, box = TRUE, size =  4)
+
+cd4_annot_feat <- cowplot::plot_grid(cd4_plot_annot, feature_grid_plot, ncol = 2, labels = c("A", "B")) 
+
+```
+
+# UP REG GENE #
+
+```{r}
+CD4_colors_annot_w_2_same_color <- CD4_colors[c(1,2,1, 4:17)]
+
+features_cd4 <- c("CD44", "CD62L")
+DefaultAssay(seurat_object_CD4) <- "ADT"
+Idents(seurat_object_CD4) <- "CD4_clust"
+cd4_vln <- VlnPlot(seurat_object_CD4, features_cd4, stack = TRUE, flip = TRUE, group.by = "CD4_clust", cols = CD4_colors_annot_w_2_same_color, fill.by = "ident") + theme(legend.position = "none") + ggtitle("Protein Surface Markers in CD4 Clusters")
+
+
+num_up <- as.data.frame(table(cd4_t_cell_marker_up$cluster))
+colnames(num_up) <- c("CD4_Cluster", "Num_Up_Genes")
+
+up_cd4 <- ggplot(num_up, aes(x = factor(CD4_Cluster), y = Num_Up_Genes, fill = factor(CD4_Cluster))) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_manual(values = CD4_colors_annot_w_2_same_color) +
+  labs(title = "Number of Upregulated DEGs in Each CD4 Cluster",
+       x = "CD4 Cluster",
+       y = "Number of Upregulated Genes",
+       fill  = "CD4 Clusters") +
+  theme_minimal() + theme(legend.position = "none")
+```
+
+```{r}
+fig_8a_cd4 <- cowplot::plot_grid(cd4_vln, up_cd4, labels = c("C", "D"), ncol = 1)
+```
+
+# 1.A-3 DEGS INTER CLUSTER B/W CONDITION
+
+```
+inter_clust_DEGS <- list()
+
+for (clust in sort(unique(seurat_object_CD4$CD4_clust))){
+  temp_seurat <- seurat_object_CD4[,seurat_object_CD4$CD4_clust == clust]
+  Idents(temp_seurat) <- "Infection"
+  
+  inter_clust_DEGS[[clust]] <- FindAllMarkers(temp_seurat, assay = "RNA", only.pos = TRUE, min.pct = 0.10, logfc.threshold = 0.25)
+  inter_clust_DEGS[[clust]]$CD4_clust <- clust
+  
+}
+```
+
+
+```
+all_inter_clust_DEGs <- bind_rows(inter_clust_DEGS)
+all_inter_clust_DEGs_sig <- all_inter_clust_DEGs[all_inter_clust_DEGs$p_val_adj < 0.05,]
+all_inter_clust_DEGs_sig_nox <- all_inter_clust_DEGs_sig[all_inter_clust_DEGs_sig$gene != "Xist",]
+
+result <- all_inter_clust_DEGs_sig_nox %>%
+  group_by(CD4_clust, cluster) %>%
+  summarize(count = n())
+
+result$y_position <- ifelse(result$cluster == "No", result$count, -result$count)
+
+ggplot(result, aes(x = sort(CD4_clust), y = y_position, fill = cluster)) +
+  geom_bar(stat = "identity", position = "stack", color = "black") +
+  labs(title = "Number of DEGs between Infection states per Clust",
+       x = "CD4_clust",
+       y = "Number of DEGs") +
+  scale_fill_manual(values = c("No" = "blue", "Ca" = "red")) +  # Adjust colors
+  theme_minimal() +
+  scale_y_continuous(labels = abs)  # Invert y-axis labels
+```
+
+# 1.B Top 5 Genes Upregulated for Cluster
+
+```{r}
+cd4_t_cell_marker_up <- readRDS(paste0(data_dir,"/CD4_data/cd4_T_cell_cluster_dge.rds"))
+cd4_t_cell_top_5_df <- readRDS(paste0(data_dir,"/CD4_data/cd4_T_cell_cluster_top5_genes.rds"))
+```
+
+```{r}
+cd4_t_cell_marker_up_sig <- subset(cd4_t_cell_marker_up, p_val_adj < 0.05)
+sig <- subset(cd4_t_cell_marker_up,avg_log2FC > 1 & p_val < 0.05)
+```
+
+```{r}
+DefaultAssay(seurat_object_CD4) <- "RNA"
+Idents(object = seurat_object_CD4) <- "CD4_clust"
+Clustered_DotPlot(seurat_object_CD4, features = c(unique(cd4_t_cell_top_5_df$gene))) #+ coord_flip()
+
+seurat_object_CD4 <- ScaleData(seurat_object_CD4, features = rownames(seurat_object_CD4))
+
+cd4_heatmap <- DoHeatmap(seurat_object_CD4, features = c(unique(cd4_t_cell_top_5_df$gene))) #+ coord_flip()
+```
+
+
+# 1.C Top 5 Proteins for Cluster
+
+```
+# Find markers for all RNA clusters
+
+Idents(seurat_object_CD4) <- "CD4_clust"
+DefaultAssay(object = seurat_object_CD4) <- "ADT"
+
+seurat_object_CD4.ADTmarkers <- FindAllMarkers(seurat_object_CD4, only.pos = TRUE, min.pct = 0.10, logfc.threshold = 0.25)
+
+saveRDS(seurat_object_CD4.ADTmarkers, file = paste0(data_dir,"/cd4_data/CD4_T_cell_cluster_dpe.rds"), ascii = FALSE, version = NULL,
+        compress = TRUE, refhook = NULL)
+
+```
+
+```
+# Extract Top Genes
+result <- seurat_object_CD4.ADTmarkers %>%
+  arrange(cluster, p_val_adj) %>%
+  group_by(cluster) %>% slice_head(n=5)
+
+cd4_t_cell_top_5_df <- Extract_Top_Markers(marker_dataframe = seurat_object_CD4.ADTmarkers, num_genes = 5, data_frame = TRUE,
+    rank_by = "avg_log2FC", named_vector = FALSE, make_unique = TRUE)
+
+saveRDS(cd4_t_cell_top_5_df, file = paste0(data_dir,"/CD4_data/cd4_T_cell_cluster_top5_proteins.rds"), ascii = FALSE, version = NULL,
+        compress = TRUE, refhook = NULL)
+```
+
+```{r}
+CD4_t_cell_protein_marker <- readRDS(paste0(data_dir,"/CD4_data/cd4_T_cell_cluster_dpe.rds"))
+#migratory_t_cell_top_5_df <- readRDS(paste0(data_dir,"/migratory_T_cell_cluster_top5_genes.rds"))
+```
+
+
+```{r}
+DefaultAssay(seurat_object_CD4) <- "ADT"
+Idents(object = seurat_object_CD4) <- "CD4_clust"
+Clustered_DotPlot(seurat_object_CD4, features = c(unique(CD4_t_cell_protein_marker$gene))) #+ coord_flip()
+
+DefaultAssay(seurat_object) <- "ADT"
+seurat_object_CD4 <- ScaleData(seurat_object_CD4, features = rownames(seurat_object_CD4))
+DoHeatmap(seurat_object_CD4, features = c(unique(CD4_t_cell_protein_marker$gene)))
+
+```
+
+# 1.D DotPlot for Cell Characterization
+
+https://www.sciencedirect.com/science/article/pii/S1074761319304509
+
+
+```{r}
+Th17 <- c("Il17a", "Cxcr6", "Rorc", "Il22", "Il23r", "Tmem176a") # Rorc points to 3, 5, 10
+Tfh <- c("Tox2","Bcl6", "Il21", "Cxcr5") # Cluster 4 # T follicular helper
+Th2 <- c("Il4", "Il2", "Il10","Il13","Gata3")
+Tregs <- c("Foxp3", "Il2ra","Ikzf2", "Tnfrsf4") 
+Th1 <- c("Tbx21", "Gzmb", "Prf1", "Ccl4")
+Naive <- c("Ccr7","Tcf7","Lef1", "Sell", "Klf2")
+Proliferating <- c("Mki67", "H2ac8")
+Differentiated <- c("Icos") # 3, 4, 5
+IfngInduced <- c("Ifit1", "Ifit3", "Isg15", "Ifngr1")
+Activated <- c("Tnf","Ifng")
+
+NK <- c("Nkg7", "Cd8a")
+Neuron <- c("Calca", "Ramp1", "Ramp3", "Ntrk3", "Gch1", "Nr3c1", "Bex3")
+
+All_genes_CD4_RNA <- list(Th17, Tregs, Tfh,Th1, Th2,Proliferating,Naive, NK, Neuron)
+names(All_genes_CD4_RNA) <- c("Th17","Tregs", "Tfh","Th1","Th2","Proliferating","Naive", "NK", "Neuron")
+
+All_genes_CD4_RNA <- list(Th17, Tregs, Tfh,Th1, Th2,Proliferating,Naive, IfngInduced)
+names(All_genes_CD4_RNA) <- c("Th17","Tregs", "Tfh","Th1","Th2","Prolif","Naive", "IFN-g")
+
+DefaultAssay(seurat_object_CD4) <- "RNA"
+cd4_dot_plot <- DotPlot(
+    seurat_object_CD4, 
+    features = All_genes_CD4_RNA, 
+    scale = TRUE, 
+    group.by = "CD4_clust", dot.min = 0.05, dot.scale = 7) + RotatedAxis() + scale_colour_gradient2(low = "#ff0000", mid = "#f5f5f5", high = "#0000ff") + theme(legend.position = "bottom")
+
+cd4_dot_plot_annot <- DotPlot(
+    seurat_object_CD4, 
+    features = All_genes_CD4_RNA, 
+    scale = TRUE, 
+    group.by = "CD4_clust_annot", dot.min = 0.05, dot.scale = 7) + RotatedAxis() + scale_colour_gradient2(low = "#ff0000", mid = "#f5f5f5", high = "#0000ff") + theme(legend.position = "bottom")
+```
+
+# 1.E PSEUDOBULK ANALYSIS
+
+Question - Do we want to just downsample cells - Therefore, randomly select cells that are from each ident, up to the lowest number of cells for a particular ident?
+
+Or would we rather get representative cells from each annotation, therefore showing the average expression from a subselected number of cells?
+
+I continued by saying we would like the representative cells.
+
+```{r}
+# Create temp seurat object
+tmp.seurat.obj <- seurat_object_CD4
+Idents(tmp.seurat.obj) <- as.character(tmp.seurat.obj$CD4_clust)
+tmp.seurat.obj$Cell_annotation <- as.character(tmp.seurat.obj$CD4_clust)
+Idents(tmp.seurat.obj) <- tmp.seurat.obj$Cell_annotation
+```
+
+# FUNCTION FOR REPRESENTATIVE CELLS
+```{r}
+library(caret)
+
+pseudo_bulk_mean_random <- function(seurat_obj, num_split = 10, slot = "data", assay = "RNA", seed.use = 1, ident) {
+  
+  # Set Seed
+  set.seed(seed.use)
+  
+  # Create matrix
+  matrix <- GetAssayData(seurat_obj, assay = assay, slot = "data")
+  cell_count <- ncol(matrix)
+  gene_count <- nrow(matrix)
+  cells_per_avg <- floor(cell_count / num_split)
+  
+  # Create 10 random folds our data of that cell type
+  indexes <- createFolds(1:cell_count, k = num_split, list = TRUE, returnTrain = FALSE)
+  
+  # All Cells
+  all_rep_cells <- matrix(nrow = gene_count)
+  rownames(all_rep_cells) <- rownames(matrix)
+  
+  # Create temp new_cells matrix
+  new_cells <- matrix(nrow = gene_count, ncol = num_split)
+  rownames(new_cells) <- rownames(matrix)
+  colnames(new_cells) <- c(rep(unique(ident),num_split))
+  
+  for (i in 1:num_split) {
+
+    # Create new_matrix with only indices from fold
+    new_matrix <- matrix[ , indexes[[i]] , drop = FALSE]
+  
+    # Fill in New Cells with Means
+    new_cells[,i] <- rowMeans(new_matrix)
+  }
+  # Add new cells to total matrix
+  all_rep_cells <- cbind(new_cells, all_rep_cells)
+  
+  # Remove NA row
+  all_rep_cells <- all_rep_cells[,-ncol(all_rep_cells)]
+  
+  # Add Colnames for Cells
+  colnames(all_rep_cells) <- paste0(ident,"_", 1:10)
+  
+  return(all_rep_cells)
+}
+```
+
+```{r}
+All_gsva_seurat_temp <- lapply(1:length(unique(tmp.seurat.obj$Cell_annotation)),function(i) {
+  sel_tmp <- subset(tmp.seurat.obj,idents=unique(tmp.seurat.obj$Cell_annotation)[i])
+  sel_tmp <- pseudo_bulk_mean_random(seurat_obj= sel_tmp, num_split=10, seed.use=1, slot="data", assay="RNA", ident= unique(tmp.seurat.obj$Cell_annotation)[i])
+  metadata <- data.frame(cell_type= paste0(c(rep(unique(tmp.seurat.obj$Cell_annotation)[i],10))), row.names= colnames(sel_tmp))
+  #sel_gsva_seurat <- CreateSeuratObject(counts = sel_tmp,assay = 'RNA',project = 'RNA',min.cells = 0)
+  sel_gsva_seurat <- CreateSeuratObject(counts = sel_tmp,assay = 'RNA',project = 'RNA',min.cells = 0,meta.data = metadata)
+  message(unique(tmp.seurat.obj$Cell_annotation)[i], " is done")
+  return(sel_gsva_seurat)
+})
+
+All_gsva_seurat <- merge(x = All_gsva_seurat_temp[[1]], y = All_gsva_seurat_temp[c(2:length(All_gsva_seurat_temp))])
+```
+
+
+# Heatmap by CD4 Characterizing Genes
+
+```{r}
+gene_annots <- data.frame(Gene_Class = rep(c("Th17", "Proliferating","Tregs","Naive", "NK", "Neuron"), c(6, 3, 3, 3, 1, 7)))
+rownames(gene_annots) <- rownames(heatmap_ord)
+
+# Annotate Clusters
+
+clust_annot <- data.frame(Cluster = rep(c("0", "1","10","11","12","13","14","15", "16", "2", "3", "4", "5", "6", "7", "8", "9"), c(10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10)))
+rownames(clust_annot) <- colnames(heatmap_ord)
+
+```
+
+```{r}
+library(ComplexHeatmap)
+library(colorRamp2)
+features <- unlist(All_genes_CD4_RNA)
+heatmap_data <- as.matrix(All_gsva_seurat@assays[["RNA"]]@data[features,,drop = FALSE])
+heatmap_ord <- heatmap_data[,sort(colnames(heatmap_data)) ]
+col<- colorRampPalette(c("darkblue", "white", "darkred"))(256)
+
+pheatmap(heatmap_ord, cluster_cols = F, cluster_rows = F, annotation_col = clust_annot, annotation_row = gene_annots, main = "CD4 Clusters by Markers", gaps_col = c(10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160), color = col)
+```
+
+# Pseudobulk Heatmap by Top 5 Genes
+
+```{r}
+library(ComplexHeatmap)
+library(colorRamp2)
+top5_features <- cd4_t_cell_top_5_df$gene
+heatmap_data <- as.matrix(All_gsva_seurat@assays[["RNA"]]@data[top5_features,,drop = FALSE])
+heatmap_ord <- heatmap_data[,sort(colnames(heatmap_data)) ]
+col<- colorRampPalette(c("darkblue", "white", "darkred"))(256)
+
+pheatmap(heatmap_ord, cluster_cols = F, cluster_rows = F, annotation_col = clust_annot, main = "CD4 Clusters by Top 5 Genes per Clust", gaps_col = c(10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160), color = col)
+```
+
+
+# Full Heatmap for Characterization
+
+```{r}
+DoHeatmap(
+    seurat_object_CD4, 
+    features = unlist(All_genes_CD4), 
+    group.by = "CD4_clust") + RotatedAxis()
+```
+
+# Figure 4 Part 2 - Violin, DotPlot CD4 Exp
+
+
+```{r}
+#fig_8a_cd4 <- cowplot::plot_grid(cd4_vln, up_cd4, labels = c("A", "B"), ncol = 1)
+#cd4_dot_plot
+fig_8b_cd4 <- cowplot::plot_grid(fig_8a_cd4, cd4_dot_plot, labels = c("", "E"), ncol = 2, rel_widths = c(0.7, 1))
+```
+
+# Supplemental Figure CD4 - Volcano and Heatmap
+
+```{r}
+supp_cd4 <- cowplot::plot_grid(cd4_heatmap, volcano_grid_plot_cd4, labels = c("A", "B"), ncol = 2, rel_widths = c(1, 1))
+
+
+
+```
+
+
+```
+ann_colors <- list(
+  gene_functions = c("Th18" = "#F46D43",
+              "Proliferating" = "#708238",
+              "Tregs" = "#9E0142",
+              "Naive" = "beige", 
+              "NK" = "violet",
+              "Neuron" = "grey",), 
+  Group = c("Disease" = "darkgreen",
+              "Control" = "blueviolet"),
+  Lymphocyte_count = brewer.pal(5, 'PuBu')
+)
+```
+
+# 1.D Annotate CD4 Clusters
+```
+Idents(object = seurat_object_CD4) <- "CD4_clust"
+
+seurat_object_CD4 <- RenameIdents(seurat_object_CD4,
+                              `0` = 'Naive CD4+ Lung',
+                              `1` = 'Naive CD4+ mLns',
+                              `2` = 'Naive CD4+ Lung',
+                              `3` = 'Naive CD4+ Colon', 
+                              `4` = 'Naive CD4+ Colon/Lung',
+                              `5` = 'Treg/Th2 CD4+ Colon/Lung',
+                              `6` = 'Th17 CD4',
+                              `7` = 'Tfh CD4+ mLns',
+                              `8` = 'Effector CD4+ Lung',
+                              `9` = 'Treg CD4+ mLns',
+                              `10` = 'Th1/NK',
+                              `11` = 'Naive Treg CD4+ Lung',
+                              `12` = 'Effector CD4+ Lung/Colon',
+                              `13` = 'Id3+ CD4+ mLns',
+                              `14` = 'Ifng Induced CD4+',
+                              `15` = 'Prolif CD4+ Lung',
+                              `16` = 'Arhgap15+ CD4+ mLns')
+
+seurat_object_CD4[["CD4_clust_annot"]] <- as.factor(Idents(seurat_object_CD4))
+
+
+DimPlot(seurat_object_CD4, reduction = "tsne_cd4_", label = TRUE, repel = TRUE, cols = CD4_colors, group.by = "CD4_clust_annot", pt.size = 1, label.box = TRUE)
+```
+
+
+# 1.F Cluster Profiler
+https://learn.gencore.bio.nyu.edu/rna-seq-analysis/over-representation-analysis/
+
+```{r}
+library(AnnotationDbi)
+library(org.Mm.eg.db)
+library(clusterProfiler)
+library(topGO)
+library(enrichplot)
+
+cd4_t_cell_marker_up_sig$entrezid <- mapIds(org.Mm.eg.db, keys = cd4_t_cell_marker_up_sig$gene, column = "ENTREZID", keytype = "SYMBOL") # Could also use ENSEMBL instead of ENTREZ
+
+# Enrich by cluster
+
+# Gene Ontology
+clust_GO <- compareCluster(entrezid~cluster, data = cd4_t_cell_marker_up_sig, OrgDb = "org.Mm.eg.db", fun = "enrichGO",keyType = "ENTREZID", ont = "BP", pvalueCutoff = 0.05, pAdjustMethod = "BH")
+
+cnetplot(clust_GO, categorySize="pvalue", node_label = "category", circular = TRUE)
+cnetplot(clust_GO, categorySize="pvalue", node_label = "gene", circular = TRUE)
+
+clusterProfiler::dotplot(clust_GO, showCategory=5, font.size = 8) + ggtitle("CD4 Cluster GO ORA")
+
+treeplot(clust_GO, showCategory = 5)
+
+clust_GO <- pairwise_termsim(clust_GO)
+emapplot(clust_GO, showCategory = 5)
+```
+
+```{r}
+
+# KEGG Pathways Analysis
+clust_KEGG <- compareCluster(entrezid~cluster, data = cd4_t_cell_marker_up_sig, organism = "mouse", fun = "enrichKEGG", pvalueCutoff = 0.05, pAdjustMethod = "BH")
+
+dotplot(clust_KEGG, showCategory=3, font.size = 8) + ggtitle("CD4 Cluster KEGG ORA")
+
+#treeplot(clust_KEGG)
+clust_KEGG <- pairwise_termsim(clust_KEGG)
+emapplot(clust_KEGG, showCategory = 5)
+
+```
+
+Filtering clustGO
+```{r}
+clust_GO_filt <- clust_GO
+cut_off <- quantile(clust_GO@compareClusterResult[["pvalue"]])
+clust_GO_filtcompareClusterResult <- clust_GO@compareClusterResult[clust_GO@compareClusterResult$pvalue < 1.011838e-05,]
+cnetplot(clust_GO_filt, categorySize="pvalue")
+```
+
+Gene Ontology only for T cell Ontology
+```{r}
+tmp_data <- as.data.frame(clust_GO)
+T.CELL <- tmp_data[grep("*T cell",tmp_data$Description,value=FALSE),]
+rownames(T.CELL) <- 1:nrow(T.CELL)
+data_sel <- new("compareClusterResult", compareClusterResult = T.CELL, geneClusters = cd4_t_cell_marker,fun = "enrichGO")
+clusterProfiler::dotplot(data_sel,showCategory=10,includeAll=FALSE,font.size=20,label_format=100) + theme(axis.text.x  = element_text(angle=45, vjust=1,size=15,hjust = 1)) + labs(title = "GO BP T.Cell Only")
+```
+
+KEGG only for T cell Ontology
+```{r}
+tmp_data <- as.data.frame(clust_KEGG)
+T.CELL <- tmp_data[grep("*T",tmp_data$Description,value=FALSE),]
+rownames(T.CELL) <- 1:nrow(T.CELL)
+data_sel <- new("compareClusterResult", compareClusterResult = T.CELL, geneClusters = cd4_t_cell_marker,fun = "enrichGKEGG")
+clusterProfiler::dotplot(data_sel,showCategory=10,includeAll=FALSE,font.size=20,label_format=100) + theme(axis.text.x  = element_text(angle=45, vjust=1,size=15,hjust = 1)) + labs(title = "KEGG T_ Only")
+```
+
+Gene Ontology only for "Host" Ontology
+```{r}
+tmp_data <- as.data.frame(clust_GO)
+host <- tmp_data[grep("*host",tmp_data$Description,value=FALSE),]
+rownames(host) <- 1:nrow(host)
+data_sel <- new("compareClusterResult", compareClusterResult = host, geneClusters = cd4_t_cell_marker,fun = "enrichGO")
+clusterProfiler::dotplot(data_sel,showCategory=10,includeAll=FALSE,font.size=20,label_format=100) + theme(axis.text.x  = element_text(angle=45, vjust=1,size=15,hjust = 1)) + labs(title = "GO BP Host Only")
+```
+
+```{r}
+tmp_data <- as.data.frame(clust_KEGG)
+host <- tmp_data[grep("*immune",tmp_data$Description,value=FALSE),]
+rownames(host) <- 1:nrow(host)
+data_sel <- new("compareClusterResult", compareClusterResult = host, geneClusters = cd4_t_cell_marker,fun = "enrichGKEGG")
+clusterProfiler::dotplot(data_sel,showCategory=10,includeAll=FALSE,font.size=20,label_format=100) + theme(axis.text.x  = element_text(angle=45, vjust=1,size=15,hjust = 1)) + labs(title = "KEGG immune Only")
+```
+
+
+# Parkinsons
+```{r}
+parkinsons <- clust_KEGG@compareClusterResult$geneID[clust_KEGG@compareClusterResult$Description == "Parkinson disease - Mus musculus (house mouse)"]
+
+gene_lists <- lapply(parkinsons, function(x) unlist(strsplit(x, "/")))
+
+# Find the common gene IDs
+sort(table(unlist(gene_lists)))
+
+```
+
+
+# Cluster 10 Gene Ontology
+```{r}
+as.data.frame(tmp_data[which(tmp_data$pvalue %in% sort(tmp_data$pvalue)[1:20]),])
+```
+
+I'm interest to find here many Pathways related to neurodegeneration are linked to Cluster 10 and 8.
+
+```{r}
+tmp_data$geneID[which(tmp_data$Description == "Alzheimer disease - Mus musculus (house mouse)" & tmp_data$Cluster == "10")]
+```
+
+# CLUSTER 6 - TH17 FIGS
+
+```{r}
+clust6_markers <- cd4_t_cell_marker_up[cd4_t_cell_marker_up$cluster == 6,]
+
+clust6_top_50_genes <- clust6_markers %>%
+  arrange(desc(avg_log2FC)) %>%  # Sort by avg_log2FC in descending order
+  head(50)                         # Select the top 2 rows
+
+print(top_genes)
+
+DefaultAssay(seurat_object_CD4) <- "RNA"
+clust6_heatmap <- DoHeatmap(seurat_object_CD4, features = c(unique(clust6_top_50_genes$gene)))
+```
+
+```{r}
+plt1_inf <- DimPlot(seurat_object_CD4[,seurat_object_CD4$Infection == "Ca"], reduction = "tsne_cd4_")
+
+plt1_no <- DimPlot(seurat_object_CD4[,seurat_object_CD4$Infection == "No"], reduction = "tsne_cd4_")
+
+
+library(cetcolor)
+
+# custom color scale
+scale.col <- cet_pal(16, name = "fire")
+
+# make plot
+plt1_inf[[1]] & 
+  stat_density_2d(aes_string(x = "tSNE_1", y = "tSNE_2", fill = "after_stat(level)"), 
+                  linewidth = 0.2, geom = "density_2d_filled", 
+                  colour = "ivory", alpha = 0.4, n = 150, h = c(1.2, 1.2)) & 
+  scale_fill_gradientn(colours = scale.col) & DarkTheme()
+
+```
+
+# Cluster 6 Dotplot for each organ
+
+```{r}
+# LUNG IN CLUSTER 6 CA VS NO
+so_cd4_clust6_lung <- seurat_object_CD4[,seurat_object_CD4$Organ == "Lung" & seurat_object_CD4$CD4_clust == "6"]
+
+Idents(so_cd4_clust6_lung) <- "Infection"
+clust6_lung_ca <- FindMarkers(so_cd4_clust6_lung, ident.1 = "Ca", assay = "RNA")
+
+clust6_top_20_lung_ca <- clust6_lung_ca %>%
+  arrange(desc(avg_log2FC)) %>%  # Sort by avg_log2FC in descending order
+  head(20)                         # Select the top 2 rows
+
+clust6_top_20_lung_ca <- clust6_top_20_lung_ca[rownames(clust6_top_20_lung_ca) != "Xist",]
+
+lung_clust6_ca <- DotPlot(so_cd4_clust6_lung, features = c(unique(rownames(clust6_top_20_lung_ca))), group.by = "Infection") + coord_flip() + ggtitle("Lung - Top 20 Upregulated in Ca")
+
+# COLON IN CLUSTER 6 CA VS NO
+so_cd4_clust6_colon <- seurat_object_CD4[,seurat_object_CD4$Organ == "Colon" & seurat_object_CD4$CD4_clust == "6"]
+
+Idents(so_cd4_clust6_colon) <- "Infection"
+clust6_colon_ca <- FindMarkers(so_cd4_clust6_colon, ident.1 = "Ca", assay = "RNA")
+
+clust6_top_20_colon_ca <- clust6_colon_ca %>%
+  arrange(desc(avg_log2FC)) %>%  # Sort by avg_log2FC in descending order
+  head(20)                         # Select the top 2 rows
+
+
+clust6_top_20_colon_ca <- clust6_top_20_colon_ca[rownames(clust6_top_20_colon_ca) != "Xist",]
+
+colon_clust6_ca <- DotPlot(so_cd4_clust6_colon, features = c(unique(rownames(clust6_top_20_colon_ca))), group.by = "Infection") + coord_flip() + ggtitle("Colon - Top 20 Upregulated in Ca")
+
+
+p <- cowplot::plot_grid(lung_clust6_ca, colon_clust6_ca, ncol = 2, labels = c("A", "B")) + ggtitle("Cluster 6 DGE")
+
+title <- ggdraw() + draw_label("Cluster 6 DGE per Organ", fontface='bold')
+
+clust6_organ_ca <- plot_grid(title, p, ncol=1, rel_heights=c(0.1, 1)) # rel_heights values control title margins
+
+```
+
+GSEA
+https://learn.gencore.bio.nyu.edu/rna-seq-analysis/gene-set-enrichment-analysis/
+
+```{r}
+original_gene_list_11 <- ca_markers_11_RNA$avg_log2FC
+names(original_gene_list_11) <- ca_markers_11_RNA$entrezid
+gene_list_11 <- na.omit(original_gene_list_11)
+gene_list_11 = sort(gene_list_11, decreasing = TRUE)
+
+gse_11 <- gseGO(geneList=gene_list_11, 
+             ont ="ALL", 
+             keyType = "ENTREZID", 
+             pvalueCutoff = 0.05, 
+             verbose = TRUE, 
+             OrgDb = org.Mm.eg.db, 
+             pAdjustMethod = "none")
+
+require(DOSE)
+dotplot(gse_11, showCategory=10, split=".sign") + facet_grid(.~.sign)
+```
+
+
+# RNA Velocity
+```{r}
+library(Seurat)
+library(velocyto.R)
+library(SeuratWrappers)
+```
+
+```{r}
+bm <- RunVelocity(object = bm, deltaT = 1, kCells = 25, fit.quantile = 0.02)
+ident.colors <- (scales::hue_pal())(n = length(x = levels(x = bm)))
+names(x = ident.colors) <- levels(x = bm)
+cell.colors <- ident.colors[Idents(object = bm)]
+names(x = cell.colors) <- colnames(x = bm)
+show.velocity.on.embedding.cor(emb = Embeddings(object = bm, reduction = "umap"), vel = Tool(object = bm, 
+    slot = "RunVelocity"), n = 200, scale = "sqrt", cell.colors = ac(x = cell.colors, alpha = 0.5), 
+    cex = 0.8, arrow.scale = 3, show.grid.flow = TRUE, min.grid.cell.mass = 0.5, grid.n = 40, arrow.lwd = 1, 
+    do.par = FALSE, cell.border.alpha = 0.1)
+```
+
+#Save CD4 RDS and Annotations
+```{r}
+saveRDS(seurat_object_CD4, file = paste0(data_dir, "/CD4_data/seurat_object_CD4.rds"))
+
+CD4_annot <- as.data.frame(seurat_object_CD4$CD4_clust_annot)
+CD4_clust_num <- as.data.frame(seurat_object_CD4$CD4_clust)
+colnames(CD4_clust_num) <- c("CD4_clust_num")
+
+saveRDS(CD4_annot, file = paste0(data_dir, "/CD4_data/cd4_annot.rds"))
+```
+
+# 10.A CD8
+
+```{r}
+seurat_object_CD8 <- readRDS(file = paste0(data_dir, "/CD8_data/seurat_object_CD8.rds"))
+```
+
+```{r}
+# Find markers for all CD4 clusters
+
+Idents(seurat_object_CD8) <- "CD8_clust"
+DefaultAssay(object = seurat_object_CD8) <- "RNA"
+
+seurat_object_CD8.RNAmarkers_pos <- FindAllMarkers(seurat_object_CD8, only.pos = TRUE, min.pct = 0.10, logfc.threshold = 0.25)
+
+seurat_object_CD8.RNAmarkers_all <- FindAllMarkers(seurat_object_CD8, min.pct = 0.10, logfc.threshold = 0.25)
+
+seurat_object_CD8.RNAmarkers_down <- FindAllMarkers(seurat_object_CD8, only.pos = TRUE, min.pct = 0.10, logfc.threshold = 0.25, max.cells.per.ident = 50)
+
+saveRDS(seurat_object_CD8.RNAmarkers_pos, file = paste0(data_dir,"/CD8_data/cd8_T_cell_cluster_dge.rds"), ascii = FALSE, version = NULL, compress = TRUE, refhook = NULL)
+
+saveRDS(seurat_object_CD8.RNAmarkers_all, file = paste0(data_dir,"/CD8_data/cd8_T_cell_cluster_dge_all.rds"), ascii = FALSE, version = NULL, compress = TRUE, refhook = NULL)
+
+# Extract Top Genes
+result <- seurat_object_CD8.RNAmarkers_pos %>%
+  arrange(cluster, p_val_adj) %>%
+  group_by(cluster) %>% slice_head(n=5)
+
+cd8_t_cell_top_5_df <- Extract_Top_Markers(marker_dataframe = seurat_object_CD8.RNAmarkers_pos, num_genes = 5, data_frame = TRUE,
+    rank_by = "avg_log2FC", named_vector = FALSE, make_unique = TRUE)
+
+saveRDS(cd8_t_cell_top_5_df, file = paste0(data_dir,"/CD8_data/cd8_T_cell_cluster_top5_genes.rds"), ascii = FALSE, version = NULL,
+        compress = TRUE, refhook = NULL)
+```
+
+# 2.A CD8 Volcano Plots
+https://bioconductor.org/packages/release/bioc/vignettes/EnhancedVolcano/inst/doc/EnhancedVolcano.html
+
+```{r}
+cd8_t_cell_marker_all <- readRDS(paste0(data_dir,"/CD8_data/cd8_T_cell_cluster_dge_all.rds"))
+cd8_t_cell_marker_pos <- readRDS(paste0(data_dir,"/CD8_data/cd8_T_cell_cluster_dge.rds"))
+```
+
+3892 unique differentially expressed genes
+
+```
+length(unique(cd8_t_cell_marker$gene))
+table(table(cd8_t_cell_marker$gene))
+```
+
+```{r}
+library(EnhancedVolcano)
+volcano_list <- list()
+for (clust in unique(cd8_t_cell_marker_all$cluster)){
+  res <- cd8_t_cell_marker_all[cd8_t_cell_marker_all$cluster == clust,]
+  print(clust)
+  top_genes <- head(res[order(-res$avg_log2FC), ], 10)
+  bottom_genes <- tail(res[order(res$avg_log2FC), ], 10)
+  selected_genes <- rbind(top_genes, bottom_genes)
+  selected_gene_names <- selected_genes$gene
+  volcano_list[[clust]] <- EnhancedVolcano(res,
+    lab = res$gene,
+    x = 'avg_log2FC',
+    y = 'p_val_adj', axisLabSize = 6, titleLabSize = 8, title = paste0("Cluster ",clust), subtitle = NULL,  captionLabSize = 6, labSize = 3, drawConnectors = TRUE,
+    widthConnectors = 0.5,
+    colConnectors = 'black') + NoLegend()
+  #, selectLab = selected_gene_names,
+}
+```
+
+```{r}
+volcano_grid_plot_cd8 <- cowplot::plot_grid(plotlist = volcano_list, ncol = 4)
+```
+
+# 2.A-2 Fig 5 - Marker Proteins and Up DEGs per Cluster
+
+```{r}
+library(paletteer)
+library(cowplot)
+library(SCpubr)
+
+
+num_up <- as.data.frame(table(cd8_t_cell_marker_pos$cluster))
+colnames(num_up) <- c("CD8_Cluster", "Num_Up_Genes")
+
+up_cd8 <- ggplot(num_up, aes(x = factor(CD8_Cluster), y = Num_Up_Genes, fill = factor(CD8_Cluster), colors = factor(CD8_Cluster))) +
+  geom_bar(stat = "identity", color = "black", show.legend = FALSE) +
+  labs(title = "Number of Upregulated DEGs in Each Cluster",
+       x = "CD8 Cluster",
+       y = "Number of Upregulated Genes",
+       fill  = "CD8 Clusters") +
+  theme_minimal() + scale_fill_manual(values=CD8_colors)
+
+```
+
+```{r}
+features_cd8 <- c("CD44", "CD62L", "CD8A", "CD29")
+DefaultAssay(seurat_object_CD8) <- "ADT"
+Idents(seurat_object_CD8) <- "CD8_clust"
+cd8_vln <- VlnPlot(seurat_object_CD8, features_cd8, stack = TRUE, flip = TRUE, group.by = "CD8_clust", cols = CD8_colors, fill.by = "ident") + theme(legend.position = "none") + ggtitle("Features in CD8 Clusters")
+```
+
+```{r}
+fig_8a_cd8 <- cowplot::plot_grid(cd8_vln, up_cd8, labels = c("C", "D"), ncol = 1)
+```
+
+
+# TSNE AND FEAT PLOT
+
+```{r}
+create_feature_plot_CD8 <- function(marker) {
+  FeaturePlot(seurat_object_CD8, features = marker, reduction = "tsne_cd8_", cols = c("yellow", "red")) + NoLegend() + theme(
+    plot.title = element_text(size = 7, face = "bold"),
+    axis.title.x = element_blank(),  # Remove x-axis label
+    axis.title.y = element_blank()   # Remove y-axis label
+  )
+}
+
+# Use lapply to create a list of plots for each feature
+DefaultAssay(seurat_object_CD8) <- "ADT"
+features_cd8_adt <- c("CD44", "CD62L", "CD29", "CD103")
+feature_plots_list_adt <- lapply(features_cd8_adt, create_feature_plot_CD8)
+
+DefaultAssay(seurat_object_CD8) <- "RNA"
+features_cd8_rna <- c("Ccr7", "Klf2", "Ccl5", "Cxcr3", "Ddit4")
+feature_plots_list_rna <- lapply(features_cd8_rna, create_feature_plot_CD8)
+
+feature_plots_all <- c(feature_plots_list_adt, feature_plots_list_rna)
+
+feature_grid_plot <- plot_grid(plotlist = feature_plots_all, ncol = 3)
+
+CD8_colors_new <- c("#865640",paletteer_d("ggthemes::calc"))
+CD8_colors_new_2 <- CD8_colors_new[c(1:8, 10)]
+
+cd8_plot <- DimPlot(seurat_object_CD8, reduction = "tsne_cd8_", group.by = "CD8_clust_annot", cols = CD8_colors_new_2) + ggtitle("CD8+ and CD4- Cell Types") + NoLegend()
+#cd8_plot_annot <- LabelClusters(plot = cd8_plot, id = "CD8_clust_annot", clusters = c("Naive CD8+ Lung/Colon", "Naive CD8+ mLns", "Eff Mem CD8+ Colon", "Eff CD8+ Colon", "Ly6c2+ CD8+ Lung/Colon", "TCRGD+ Lung", "KLRG1+ Eff CD8+ Lung", "Isg15+ CD8+ mLns", "Naive CD8+ mLns", "Exhaust CD8+ mLns"), color = c("white", "white", "black", "black", "black", "white", "black", "white", "black", "white"), repel = TRUE, box = TRUE)
+cd8_plot_annot <- LabelClusters(plot = cd8_plot, id = "CD8_clust_annot", color = c("black", "white", "black", "black", "white", "white", "black", "white", "white"), repel = TRUE, box = TRUE, size = 4)
+
+cd8_annot_feat <- cowplot::plot_grid(cd8_plot_annot, feature_grid_plot, ncol = 2, labels = c("A", "B")) 
+
+```
+
+
+
+# 2.A-3 DEGS INTER CLUSTER B/W CONDITION
+
+```
+inter_clust_DEGS <- list()
+
+for (clust in sort(unique(seurat_object_CD8$CD8_clust))){
+  temp_seurat <- seurat_object_CD8[,seurat_object_CD8$CD8_clust == clust]
+  Idents(temp_seurat) <- "Infection"
+  
+  inter_clust_DEGS[[clust]] <- FindAllMarkers(temp_seurat, assay = "RNA", only.pos = TRUE, min.pct = 0.10, logfc.threshold = 0.25)
+  inter_clust_DEGS[[clust]]$CD8_clust <- clust
+  
+}
+```
+
+
+```
+all_inter_clust_DEGs <- bind_rows(inter_clust_DEGS)
+all_inter_clust_DEGs_sig <- all_inter_clust_DEGs[all_inter_clust_DEGs$p_val_adj < 0.05,]
+all_inter_clust_DEGs_sig_nox <- all_inter_clust_DEGs_sig[all_inter_clust_DEGs_sig$gene != "Xist",]
+
+result <- all_inter_clust_DEGs_sig_nox %>%
+  group_by(CD8_clust, cluster) %>%
+  summarize(count = n())
+
+result$y_position <- ifelse(result$cluster == "No", result$count, -result$count)
+
+ggplot(result, aes(x = sort(CD8_clust), y = y_position, fill = cluster)) +
+  geom_bar(stat = "identity", position = "stack", color = "black") +
+  labs(title = "Number of DEGs between Infection states per Clust",
+       x = "CD8_clust",
+       y = "Number of DEGs") +
+  scale_fill_manual(values = c("No" = "blue", "Ca" = "red")) +  # Adjust colors
+  theme_minimal() +
+  scale_y_continuous(labels = abs)  # Invert y-axis labels
+```
+
+
+# 2.B Top 5 Genes Upregulated for Cluster
+
+```{r}
+cd8_t_cell_marker_up <- readRDS(paste0(data_dir,"/CD8_data/cd8_T_cell_cluster_dge.rds"))
+cd8_t_cell_top_5_df <- readRDS(paste0(data_dir,"/CD8_data/cd8_T_cell_cluster_top5_genes.rds"))
+```
+
+```{r}
+cd8_t_cell_marker_up_sig <- subset(cd8_t_cell_marker_up, p_val_adj < 0.05)
+sig <- subset(cd8_t_cell_marker_up,avg_log2FC > 1 & p_val < 0.05)
+```
+
+```{r}
+DefaultAssay(seurat_object_CD8) <- "RNA"
+Idents(object = seurat_object_CD8) <- "CD8_clust"
+Clustered_DotPlot(seurat_object_CD8, features = c(unique(cd8_t_cell_top_5_df$gene))) #+ coord_flip()
+
+seurat_object_CD8 <- ScaleData(seurat_object_CD8, features = rownames(seurat_object_CD8))
+
+DoHeatmap(seurat_object_CD8, features = c(unique(cd8_t_cell_top_5_df$gene))) #+ coord_flip()
+```
+
+
+# 2.C Top 5 Proteins for Cluster
+
+```
+# Find markers for all RNA clusters
+
+Idents(seurat_object_CD8) <- "CD8_clust"
+DefaultAssay(object = seurat_object_CD8) <- "ADT"
+
+seurat_object_CD8.ADTmarkers <- FindAllMarkers(seurat_object_CD8, only.pos = TRUE, min.pct = 0.10, logfc.threshold = 0.25)
+
+saveRDS(seurat_object_CD8.ADTmarkers, file = paste0(data_dir,"/CD8_data/CD8_T_cell_cluster_dpe.rds"), ascii = FALSE, version = NULL,
+        compress = TRUE, refhook = NULL)
+
+```
+
+```
+# Extract Top Genes
+result <- seurat_object_CD8.ADTmarkers %>%
+  arrange(cluster, p_val_adj) %>%
+  group_by(cluster) %>% slice_head(n=5)
+
+cd8_t_cell_top_5_df <- Extract_Top_Markers(marker_dataframe = seurat_object_CD8.ADTmarkers, num_genes = 5, data_frame = TRUE,
+    rank_by = "avg_log2FC", named_vector = FALSE, make_unique = TRUE)
+
+saveRDS(cd8_t_cell_top_5_df, file = paste0(data_dir,"/CD8_data/cd8_T_cell_cluster_top5_proteins.rds"), ascii = FALSE, version = NULL,
+        compress = TRUE, refhook = NULL)
+```
+
+```{r}
+CD8_t_cell_protein_marker <- readRDS(paste0(data_dir,"/CD8_data/cd8_T_cell_cluster_dpe.rds"))
+```
+
+
+```{r}
+DefaultAssay(seurat_object_CD8) <- "ADT"
+Idents(object = seurat_object_CD8) <- "CD8_clust"
+Clustered_DotPlot(seurat_object_CD8, features = c(unique(CD8_t_cell_protein_marker$gene))) #+ coord_flip()
+
+DefaultAssay(seurat_object) <- "ADT"
+seurat_object_CD8 <- ScaleData(seurat_object_CD8, features = rownames(seurat_object_CD8))
+DoHeatmap(seurat_object_CD8, features = c(unique(CD8_t_cell_protein_marker$gene)))
+
+```
+
+```{r}
+table(seurat_object_CD8$Organ, seurat_object_CD8$CD8_clust)
+VlnPlot(seurat_object_CD8, features = c("CD62L", "CD44", "CD8A", "CD4"), group.by = "CD8_clust", ncol = 2)
+```
+
+# 2.D PSEUDOBULK ANALYSIS
+
+Question - Do we want to just downsample cells - Therefore, randomly select cells that are from each ident, up to the lowest number of cells for a particular ident?
+
+Or would we rather get representative cells from each annotation, therefore showing the average expression from a subselected number of cells?
+
+I continued by saying we would like the representative cells.
+
+```{r}
+# Create temp seurat object
+tmp.seurat.obj <- seurat_object_CD8
+Idents(tmp.seurat.obj) <- as.character(tmp.seurat.obj$CD8_clust)
+tmp.seurat.obj$Cell_annotation <- as.character(tmp.seurat.obj$CD8_clust)
+Idents(tmp.seurat.obj) <- tmp.seurat.obj$Cell_annotation
+```
+
+# FUNCTION FOR REPRESENTATIVE CELLS
+```{r}
+All_gsva_seurat_temp <- lapply(1:length(unique(tmp.seurat.obj$Cell_annotation)),function(i) {
+  sel_tmp <- subset(tmp.seurat.obj,idents=unique(tmp.seurat.obj$Cell_annotation)[i])
+  sel_tmp <- pseudo_bulk_mean_random(seurat_obj= sel_tmp, num_split=10, seed.use=1, slot="data", assay="RNA", ident= unique(tmp.seurat.obj$Cell_annotation)[i])
+  metadata <- data.frame(cell_type= paste0(c(rep(unique(tmp.seurat.obj$Cell_annotation)[i],10))), row.names= colnames(sel_tmp))
+  #sel_gsva_seurat <- CreateSeuratObject(counts = sel_tmp,assay = 'RNA',project = 'RNA',min.cells = 0)
+  sel_gsva_seurat <- CreateSeuratObject(counts = sel_tmp,assay = 'RNA',project = 'RNA',min.cells = 0,meta.data = metadata)
+  message(unique(tmp.seurat.obj$Cell_annotation)[i], " is done")
+  return(sel_gsva_seurat)
+})
+
+All_gsva_seurat <- merge(x = All_gsva_seurat_temp[[1]], y = All_gsva_seurat_temp[c(2:length(All_gsva_seurat_temp))])
+```
+
+```
+#Annotate Genes
+
+Th17_genes <- c("Il17a", "Cxcr6", "Rorc", "Il22", "Il23r", "Tmem176a")
+Naive <- c("Sell", "Ccr7", "Lef1")
+Proliferating <- c("Mki67", "Top2a", "Cdk1")
+Tfh <- c("Bcl6") # Cluster 4 # T follicular helper #https://www.sciencedirect.com/science/article/pii/S1074761319304509
+Tregs <- c("Foxp3", "Il2ra","Ikzf2")
+NK <- c("Nkg7")
+
+Differentiated <- c("Icos") # 3, 4, 5
+
+#Klf2 - Naive https://journals.aai.org/jimmunol/article/178/12/7632/75307/Kru-ppel-Like-Factor-2-Controls-T-Cell-Trafficking
+Activated <- c("Tnf","Ifng","Fos","Jun")
+
+NK <- c("Nkg7")
+Neuron <- c("Calca", "Ramp1", "Ramp3", "Ntrk3", "Gch1", "Nr3c1", "Bex3")
+
+All_genes_CD4_RNA <- list(Th17_genes, Proliferating, Tregs,Naive, NK, Neuron)
+names(All_genes_CD4_RNA) <- c("Th17", "Proliferating","Tregs","Naive","NK", "Neuron")
+```
+
+# DotPlot by CD8 Characterizing Genes
+```{r}
+DefaultAssay(seurat_object_CD8) <- "RNA"
+DotPlot(
+    seurat_object_CD8, 
+    features = All_genes_CD8_RNA, 
+    scale = FALSE, 
+    group.by = "CD8_clust") + RotatedAxis() + scale_colour_gradient2(low = "#ff0000", mid = "#f5f5f5", high = "#0000ff")
+```
+
+
+# Heatmap by CD8 Characterizing Genes
+
+```
+gene_annots <- data.frame(Gene_Class = rep(c("Th17", "Proliferating","Tregs","Naive", "NK", "Neuron"), c(6, 3, 3, 3, 1, 7)))
+rownames(gene_annots) <- rownames(heatmap_ord)
+
+# Annotate Clusters
+
+clust_annot <- data.frame(Cluster = rep(c("0", "1", "2", "3", "4", "5", "6", "7", "8", "9"), c(10, 10, 10, 10, 10, 10, 10, 10, 10, 10)))
+rownames(clust_annot) <- colnames(heatmap_ord)
+
+```
+
+```
+library(ComplexHeatmap)
+library(colorRamp2)
+features <- unlist(All_genes_CD4_RNA)
+heatmap_data <- as.matrix(All_gsva_seurat@assays[["RNA"]]@data[features,,drop = FALSE])
+heatmap_ord <- heatmap_data[,sort(colnames(heatmap_data)) ]
+col<- colorRampPalette(c("darkblue", "white", "darkred"))(256)
+
+pheatmap(heatmap_ord, cluster_cols = F, cluster_rows = F, annotation_col = clust_annot, annotation_row = gene_annots, main = "CD4 Clusters by Markers", gaps_col = c(10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160), color = col)
+```
+
+# Heatmap by Top 5 Genes
+
+```{r}
+library(ComplexHeatmap)
+library(colorRamp2)
+top5_features <- cd8_t_cell_top_5_df$gene
+heatmap_data <- as.matrix(All_gsva_seurat@assays[["RNA"]]@data[top5_features,,drop = FALSE])
+heatmap_ord <- heatmap_data[,sort(colnames(heatmap_data)) ]
+col<- colorRampPalette(c("darkblue", "white", "darkred"))(256)
+
+clust_annot <- data.frame(Cluster = rep(c("0", "1", "2", "3", "4", "5", "6", "7", "8", "9"), c(10, 10, 10, 10, 10, 10, 10, 10, 10, 10)))
+rownames(clust_annot) <- colnames(heatmap_ord)
+
+pheatmap(heatmap_ord, cluster_cols = F, cluster_rows = F, annotation_col = clust_annot, main = "CD8 Clusters by Top 5 Genes per Clust", gaps_col = c(10, 20, 30, 40, 50, 60, 70, 80, 90), color = col)
+```
+
+
+# 2.D-2 - ADT MARKER/CHARACTERIZING PROTEINS
+
+```{r}
+DefaultAssay(object = seurat_object_CD8) <- "ADT"
+ADT_markers <- c("CD62L", "CCR6", "CD44", "CD8A")
+
+FeaturePlot(seurat_object_CD8, features = c(ADT_markers),
+                  reduction = 'umap_CD8_', 
+                  cols = c("lightgrey","darkgreen"), ncol = 2)
+```
+
+
+# DotPlot for Cell Characterization
+
+```{r}
+Naive <- c("Il7r","Ccr7","Tcf7","Lef1", "Sell")
+Memory <- c("Eomes","Gzmk","Cxcr3")
+Effector <- c("Tbx21","Prdm1", "Runx3", "Stat4", "Stat5", "Id2")
+Cen_Mem <- c("Id3", "Tcf1", "Stat3", "Ccr7", "Il7r", "Bcl6")
+Exhaust <- c("Foxp1", "Ctla4")
+
+Cytotoxic <- c("Stat4", "Ifng", "Tnfa", "Gzmb", "Prdm1")
+Cytotoxic_ADT <- c("CD29")
+NK <- c("Tyrobp","Ncam1","Cd160", "Nkg7")
+Neuron <- c("Calca", "Ramp1", "Ramp3", "Ntrk3", "Gch1", "Nr3c1", "Bex3")
+
+All_genes_CD8_RNA <- list(Naive,Memory,Effector,Activated,Exhaust, NK)
+names(All_genes_CD8_RNA) <- c("Naive","Memory","Eff","Activated","Exhausted", "NK")
+
+DefaultAssay(seurat_object_CD8) <- "RNA"
+DotPlot(
+    seurat_object_CD8, 
+    features = All_genes_CD8_RNA, 
+    scale = FALSE, 
+    group.by = "CD8_clust") + RotatedAxis() + scale_colour_gradient2(low = "#ff0000", mid = "#f5f5f5", high = "#0000ff")
+```
+
+# Heatmap for Characterization
+
+```{r}
+DoHeatmap(
+    seurat_object_CD8, 
+    features = unlist(All_genes_CD8), 
+    group.by = "CD8_clust") + RotatedAxis()
+```
+
+
+```{r}
+Eff <- c("KLRG1", "CD43", "CD69", "CD137")
+Cen_Mem <- c("CCR7", "CD44", "CD62L", "IL2RA.CD25","IL2RB.CD122", "IL7RA.CD127")
+#Eff_Mem <- c("KLRG1")
+Exhaust <- c("BTLA.CD272", "LAG3.CD223", "PD1L2.CD273")
+
+All_genes_CD8_ADT <- list(Eff, Cen_Mem, Exhaust)
+names(All_genes_CD8_ADT) <- list("Eff", "CenMem", "Exhaust")
+
+cd8_adt_list <- rev(c("CD62L", "CD8A", "CD44", "TCRGD", "CD29", "CD69", "CD103", "PD1L2.CD273", "IL7RA.CD127", "CD43", "KLRG1", "LAG3.CD223", "BTLA.CD272", "IL2RB.CD122", "CCR7", "CD137"))
+
+DefaultAssay(seurat_object_CD8) <- "ADT"
+DotPlot(
+    seurat_object_CD8, 
+    features = All_genes_CD8_ADT, 
+    scale = TRUE, 
+    group.by = "CD8_clust") + RotatedAxis() + scale_colour_gradient2(low = "#ff0000", mid = "#f5f5f5", high = "#0000ff")
+
+cd8_dot_plot <- DotPlot(
+    seurat_object_CD8, 
+    features = cd8_adt_list, 
+    scale = TRUE, 
+    group.by = "CD8_clust") + coord_flip() + scale_colour_gradient2(low = "#ff0000", mid = "#f5f5f5", high = "#0000ff")
+
+
+cd8_dot_plot <- DotPlot(
+    seurat_object_CD8, 
+    features = cd8_adt_list, 
+    scale = TRUE, 
+    group.by = "CD8_clust_annot") + scale_colour_gradient2(low = "#ff0000", mid = "#f5f5f5", high = "#0000ff") + theme(axis.text.x = element_text(angle = 45, margin = margin(t = 21)))
+
+Idents(seurat_object_CD8) <- "CD8_clust"
+VlnPlot( seurat_object_CD8, 
+    features = cd8_adt_list, stack = TRUE, flip = TRUE) + NoLegend()
+
+```
+
+
+```
+ann_colors <- list(
+  gene_functions = c("Th18" = "#F46D43",
+              "Proliferating" = "#708238",
+              "Tregs" = "#9E0142",
+              "Naive" = "beige", 
+              "NK" = "violet",
+              "Neuron" = "grey",), 
+  Group = c("Disease" = "darkgreen",
+              "Control" = "blueviolet"),
+  Lymphocyte_count = brewer.pal(5, 'PuBu')
+)
+```
+
+# Figure 9  Part 2 - Violin, DotPlot CD8 Exp
+
+```{r}
+
+```
+
+
+```{r}
+#fig_8a_cd8 <- cowplot::plot_grid(cd4_vln, up_cd4, labels = c("A", "B"), ncol = 1)
+#cd8_dot_plot
+fig_8b_cd8 <- cowplot::plot_grid(fig_8a_cd8, cd8_dot_plot, labels = c("", "E"), ncol = 2, rel_widths = c(1, 1))
+```
+
+```{r}
+
+```
+
+
+# 2.F Annotate CD8 Clusters
+```
+Idents(object = seurat_object_CD8) <- "CD8_clust"
+
+seurat_object_CD8 <- RenameIdents(seurat_object_CD8,
+                              `0` = 'Naive CD8+ Lung/Colon',
+                              `1` = 'Naive CD8+ mLns',
+                              `2` = 'Eff Mem CD8+ Colon',
+                              `3` = 'Eff CD8+ Colon', 
+                              `4` = 'Ly6c2+ CD8+ Lung/Colon',
+                              `5` = 'TCRGD+ Lung',
+                              `6` = 'KLRG1+ Eff CD8+ Lung',
+                              `7` = 'Isg15+ CD8+ mLns',
+                              `8` = 'Naive CD8+ mLns',
+                              `9` = 'Exhaust CD8+ mLns')
+
+seurat_object_CD8[["CD8_clust_annot"]] <- as.factor(Idents(seurat_object_CD8))
+
+
+DimPlot(seurat_object_CD8, reduction = "tsne_cd8_", label = TRUE, repel = TRUE, cols = CD8_colors, group.by = "CD8_clust_annot", pt.size = 1, label.box = TRUE)
+```
+
+
+
+# 2.G Cluster Profiler
+https://learn.gencore.bio.nyu.edu/rna-seq-analysis/over-representation-analysis/
+
+```{r}
+library(AnnotationDbi)
+library(org.Mm.eg.db)
+library(clusterProfiler)
+library(topGO)
+library(enrichplot)
+
+cd8_t_cell_marker_up_sig$entrezid <- mapIds(org.Mm.eg.db, keys = cd8_t_cell_marker_up_sig$gene, column = "ENTREZID", keytype = "SYMBOL") # Could also use ENSEMBL instead of ENTREZ
+
+# Enrich by cluster
+
+# Gene Ontology
+clust_GO <- compareCluster(entrezid~cluster, data = cd8_t_cell_marker_up_sig, OrgDb = "org.Mm.eg.db", fun = "enrichGO",keyType = "ENTREZID", ont = "BP", pvalueCutoff = 0.05, pAdjustMethod = "BH")
+
+cnetplot(clust_GO, categorySize="pvalue", node_label = "category", circular = TRUE)
+cnetplot(clust_GO, categorySize="pvalue", node_label = "gene", circular = TRUE)
+
+clusterProfiler::dotplot(clust_GO, showCategory=5, font.size =8) + ggtitle("CD8 Cluster GO ORA")
+
+clust_GO <- pairwise_termsim(clust_GO)
+emapplot(clust_GO, showCategory = 5)
+
+treeplot(clust_GO)
+```
+
+```{r}
+
+# KEGG Pathways Analysis
+clust_KEGG <- compareCluster(entrezid~cluster, data = cd8_t_cell_marker_up_sig, organism = "mouse", fun = "enrichKEGG", pvalueCutoff = 0.05, pAdjustMethod = "BH")
+
+dotplot(clust_KEGG, showCategory=5) + ggtitle("CD8 Cluster KEGG ORA") + theme(axis.text.y=element_text(size=7))
+
+
+clust_KEGG <- pairwise_termsim(clust_KEGG)
+treeplot(clust_KEGG)
+emapplot(clust_KEGG, showCategory = 5)
+
+```
+
+Filtering clustGO
+```{r}
+clust_GO_filt <- clust_GO
+cut_off <- quantile(clust_GO@compareClusterResult[["pvalue"]])
+clust_GO_filtcompareClusterResult <- clust_GO@compareClusterResult[clust_GO@compareClusterResult$pvalue < 1.011838e-05,]
+cnetplot(clust_GO_filt, categorySize="pvalue")
+```
+
+Gene Ontology only for T cell Ontology
+```{r}
+tmp_data <- as.data.frame(clust_GO)
+T.CELL <- tmp_data[grep("*T cell",tmp_data$Description,value=FALSE),]
+rownames(T.CELL) <- 1:nrow(T.CELL)
+data_sel <- new("compareClusterResult", compareClusterResult = T.CELL, geneClusters = cd8_t_cell_marker,fun = "enrichGO")
+clusterProfiler::dotplot(data_sel,showCategory=10,includeAll=FALSE,font.size=20,label_format=100) + theme(axis.text.x  = element_text(angle=45, vjust=1,size=15,hjust = 1)) + labs(title = "GO BP T.Cell Only")
+```
+
+KEGG only for T cell Ontology
+```{r}
+tmp_data <- as.data.frame(clust_KEGG)
+T.CELL <- tmp_data[grep("*T",tmp_data$Description,value=FALSE),]
+rownames(T.CELL) <- 1:nrow(T.CELL)
+data_sel <- new("compareClusterResult", compareClusterResult = T.CELL, geneClusters = cd8_t_cell_marker,fun = "enrichGKEGG")
+clusterProfiler::dotplot(data_sel,showCategory=10,includeAll=FALSE,font.size=20,label_format=100) + theme(axis.text.x  = element_text(angle=45, vjust=1,size=15,hjust = 1)) + labs(title = "KEGG T_ Only")
+```
+
+Gene Ontology only for "Host" Ontology
+```{r}
+tmp_data <- as.data.frame(clust_GO)
+host <- tmp_data[grep("*host",tmp_data$Description,value=FALSE),]
+rownames(host) <- 1:nrow(host)
+data_sel <- new("compareClusterResult", compareClusterResult = host, geneClusters = cd8_t_cell_marker,fun = "enrichGO")
+clusterProfiler::dotplot(data_sel,showCategory=10,includeAll=FALSE,font.size=20,label_format=100) + theme(axis.text.x  = element_text(angle=45, vjust=1,size=15,hjust = 1)) + labs(title = "GO BP Host Only")
+```
+
+```{r}
+tmp_data <- as.data.frame(clust_KEGG)
+host <- tmp_data[grep("*immune",tmp_data$Description,value=FALSE),]
+rownames(host) <- 1:nrow(host)
+data_sel <- new("compareClusterResult", compareClusterResult = host, geneClusters = cd8_t_cell_marker,fun = "enrichGKEGG")
+clusterProfiler::dotplot(data_sel,showCategory=10,includeAll=FALSE,font.size=20,label_format=100) + theme(axis.text.x  = element_text(angle=45, vjust=1,size=15,hjust = 1)) + labs(title = "KEGG immune Only")
+```
+
+# Save CD8 RDS and Annot
+```{r}
+saveRDS(seurat_object_CD8, file = paste0(data_dir, "/CD8_data/seurat_object_CD8.rds"))
+
+CD8_annot <- as.data.frame(seurat_object_CD8$CD8_clust_annot)
+
+saveRDS(CD8_annot, file = paste0(data_dir, "/CD8_data/cd8_annot.rds"))
+```
+
+
+## Adding Annotations to Seurat Object
+
+```
+seurat_object <- readRDS(file = paste0(data_dir,"/dataset_post_QC.rds"))
+
+CD4_annot <- readRDS(file = paste0(data_dir, "/CD4_data/cd4_annot.rds"))
+CD8_annot <- readRDS(file = paste0(data_dir, "/CD8_data/cd8_annot.rds"))
+
+CD4_annot$barcodes <- rownames(CD4_annot)
+CD8_annot$barcodes <- rownames(CD8_annot)
+
+colnames(CD4_annot) <- c("CD_annot", "barcodes")
+colnames(CD8_annot) <- c("CD_annot", "barcodes")
+
+all_idents <- rbind(CD4_annot, CD8_annot)
+
+merged_data <- merge(seurat_object@meta.data, all_idents, by.x = "cell_barcode", by.y = "barcodes", all.x = TRUE)
+
+# Update the ident in Seurat object
+seurat_object@meta.data$CD_annot <- merged_data$CD_annot.y
+seurat_object$CD_annot <- merged_data$CD_annot
+```
+
+```
+saveRDS(seurat_object, file = paste0(data_dir, "/dataset_w_annot.rds"))
+```
+
+
+# Latex DGE Tables
+
+```{r}
+# Latex CD4 DGE
+library(xtable)
+latex_table <- xtable(cd4_t_cell_marker_all, caption = "CD4 Differential Gene Expression", label = "tab:sample")
+
+# Print the LaTeX code
+print(latex_table, caption.placement = "top", include.rownames = FALSE)
+
+latex_table <- xtable(cd8_t_cell_marker_all, caption = "CD8 Differential Gene Expression", label = "tab:sample")
+
+# Print the LaTeX code
+print(latex_table, caption.placement = "top", include.rownames = FALSE)
+
+```
+
+```
+#setwd(data_dir)
+saveRDS(seurat_object, file = paste0(data_dir, "dataset_clean_scRNA_ADT_new_metadata.Rds"))
+```
+
+# Neuro Genes
+
+```{r}
+Neuron <- c("Calca", "Ramp1", "Ramp3", "Ntrk3", "Gch1", "Nr3c1", "Bex3")
+Idents(seurat_object) <- "CD_annot"
+VlnPlot(seurat_object, features = Neuron, group.by = "CD_annot", stack = TRUE, flip = TRUE, fill.by = "ident") + NoLegend()
+
+```
+
+
+# Cell Cycle Score
+
+```{r}
+s.genes <- cc.genes$s.genes
+g2m.genes <- cc.genes$g2m.genes
+
+Idents(seurat_object_CD4) <- "CD4_clust"
+seurat_object_CD4 <- CellCycleScoring(seurat_object_CD4, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+cell_cycle_a <- RidgePlot(seurat_object_CD4, features = c("G2M.Score"), ncol = 1) + NoLegend() + labs(y = "CD4 Cluster")
+cell_cycle_b <- RidgePlot(seurat_object_CD4, features = c("S.Score"), ncol = 1)+ NoLegend() + labs(y = "CD4 Cluster")
+
+phases_clust_df <- as.data.frame(table(seurat_object_CD4$CD4_clust, seurat_object_CD4@meta.data[["Phase"]]))
+colnames(phases_clust_df) <- c("CD4 Cluster", "Phase", "Frequency")
+
+phase_colors <- c("G1" = "skyblue", "S" = "lightgreen", "G2M" = "salmon")
+
+phases_clust_df <- phases_clust_df %>%
+  group_by(`CD4 Cluster`) %>%
+  mutate(Percentage = Frequency / sum(Frequency) * 100)
+
+
+# Create the stacked bar plot
+stacked_barplot <- ggplot(phases_clust_df, aes(x = factor(`CD4 Cluster`), y = Frequency, fill = Phase)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = phase_colors) +
+  labs(x = "CD4 Cluster", y = "Number of Cells in Cell Cycle", fill = "Phase") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle("CD4 Clusters by Cell Cycle Phase (Total Number)")
+
+# Percentage stacked barplot
+stacked_barplot_percentage <- ggplot(phases_clust_df, aes(x = factor(`CD4 Cluster`), y = Percentage, fill = Phase)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(Percentage), "%"), group = Phase),
+            position = position_stack(vjust = 0.5), color = "black", size = 3) +
+  scale_fill_manual(values = phase_colors) +
+  labs(x = "CD4 Cluster", y = "Percentage of Cells in Cell Cycle", fill = "Phase") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle("CD4 Clusters by Cell Cycle Phase (%)")
+
+cell_cycle_CD4 <- cowplot::plot_grid(stacked_barplot_percentage, cell_cycle_a, stacked_barplot, cell_cycle_b, ncol = 2, labels = c("A", "C", "B", "D"))
+
+```
+
+```{r}
+Idents(seurat_object_CD8) <- "CD8_clust"
+seurat_object_CD8 <- CellCycleScoring(seurat_object_CD8, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+Idents(seurat_object_CD8) <- "CD8_clust"
+cell_cycle_a <- RidgePlot(seurat_object_CD8, features = c("G2M.Score"), ncol = 1) + NoLegend() + labs(y = "CD8 Cluster")
+cell_cycle_b <- RidgePlot(seurat_object_CD8, features = c("S.Score"), ncol = 1)+ NoLegend() + labs(y = "CD8 Cluster")
+
+phases_clust_df <- as.data.frame(table(seurat_object_CD8$CD8_clust, seurat_object_CD8@meta.data[["Phase"]]))
+colnames(phases_clust_df) <- c("CD8 Cluster", "Phase", "Frequency")
+
+phase_colors <- c("G1" = "skyblue", "S" = "lightgreen", "G2M" = "salmon")
+
+phases_clust_df <- phases_clust_df %>%
+  group_by(`CD8 Cluster`) %>%
+  mutate(Percentage = Frequency / sum(Frequency) * 100)
+
+
+# Create the stacked bar plot
+stacked_barplot <- ggplot(phases_clust_df, aes(x = factor(`CD8 Cluster`), y = Frequency, fill = Phase)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = phase_colors) +
+  labs(x = "CD8 Cluster", y = "Number of Cells in Cell Cycle", fill = "Phase") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle("CD8 Clusters by Cell Cycle Phase (Total Number)")
+
+# Percentage stacked barplot
+stacked_barplot_percentage <- ggplot(phases_clust_df, aes(x = factor(`CD8 Cluster`), y = Percentage, fill = Phase)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(Percentage), "%"), group = Phase),
+            position = position_stack(vjust = 0.5), color = "black", size = 3) +
+  scale_fill_manual(values = phase_colors) +
+  labs(x = "CD8 Cluster", y = "Percentage of Cells in Cell Cycle", fill = "Phase") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle("CD8 Clusters by Cell Cycle Phase (%)")
+
+cell_cycle_CD8 <- cowplot::plot_grid(stacked_barplot_percentage, cell_cycle_a, stacked_barplot, cell_cycle_b, ncol = 2, labels = c("A", "C", "B", "D"))
+
+```
+
+## FIGURE FOR ILIYAN 02/15
+
+```{r}
+cd4_annot_feat
+
+
+CD4_colors_annot <- CD4_colors[c(1,2, 4:17)]
+
+cd4_colors_iliyan <- c("grey","grey","#579D1CFF","purple", "grey", "#FF420EFF", "grey", "grey", "grey", "grey", "grey", "grey", "grey", "grey","#0084D1FF","grey")
+
+cd4_plot_th17 <- DimPlot(seurat_object_CD4, reduction = "tsne_cd4_", group.by = "CD4_clust_annot", cols = cd4_colors_iliyan, pt.size = 1) + ggtitle("CD4+ Cell Types") + NoLegend()
+cd4_plot_th17 <- LabelClusters(plot = cd4_plot_th17, id = "CD4_clust_annot", clusters = c("Naive CD4+ Lung", "Naive CD4+ mLns", "Naive CD4+ Colon",  "Naive CD4+ Colon/Lung", "Treg/Th2 CD4+ Colon/Lung", "Th17 CD4", "Tfh CD4+ mLns", "Effector CD4+ Lung", "Treg CD4+ mLns", "Th1/NK", "Naive Treg CD4+ Lung","Effector CD4+ Lung/Colon", "Id3+ CD4+ mLns","Ifng Induced CD4+", "Prolif CD4+ Lung", "Arhgap15+ CD4+ mLns"), color = c("white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white", "white"), repel = TRUE, box = TRUE, size =  4)
+
+
+cd4_annot_feat <- cowplot::plot_grid(cd4_plot_th17, feature_grid_plot, ncol = 2, labels = c("A", "B")) 
+
+DefaultAssay(seurat_object_CD4) <-
+cd4_dot_plot_annot <- DotPlot(
+    seurat_object_CD4, 
+    features = All_genes_CD4_RNA, 
+    scale = TRUE, 
+    group.by = "CD4_clust_annot", dot.min = 0.05, dot.scale = 7) + RotatedAxis() + scale_colour_gradient2(low = "#ff0000", mid = "#f5f5f5", high = "#0000ff") + theme(legend.position = "bottom")
+
+final_abundance_graph_cd4_annot
+
+cd4_abundance_dot <- cowplot::plot_grid(final_abundance_graph_cd4_annot, cd4_dot_plot_annot, ncol = 2, labels = c("C", "D"), rel_widths = c(0.8, 1) ) 
+
+cowplot::plot_grid(cd4_annot_feat, cd4_abundance_dot, ncol = 1) 
+
+```
+

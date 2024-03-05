@@ -1,0 +1,194 @@
+---
+title: "Candida_sc_higher_resolution_clust"
+author: "Nathan Morris"
+date: "2024-01-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = getwd())
+```
+
+### Data Import
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+# Data Import
+library(Seurat)
+library(scater)
+library(dplyr)
+library(SingleR)
+library(celldex)
+library(scRNAseq)
+library(scran)
+library(gridExtra)
+library(pheatmap)
+library(ess)
+library(reshape2)
+library(ggpubr)
+library(scCustomize)
+library(gridExtra)
+library(monocle3)
+
+## For Reticulate (Python-R wrapper)
+conda_list()
+use_condaenv("r-reticulate")    #activate an environment e.g py2_env
+py_install("opentsne")
+reticulate::py_install("phate", pip=TRUE)
+devtools::install_github("KrishnaswamyLab/phateR")
+py_install("fa2")
+
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+```
+
+```{r}
+seurat_object <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT_new_metadata.Rds"))
+```
+
+# 2. Reclustering with Higher Resolution
+
+Here I retrace what Immgen did in order to accurately recluster with higher resolution.
+
+The steps they ran:
+For RNA-
+1. Normalize the data  - NormalizeData(seurat_object, verbose = T, normalization.method = "LogNormalize",     scale.factor = 10000, assay = "RNA")
+2. FindVariableFeatures - FindVariableFeatures(seurat_object, selection.method = "vst",     nfeatures = 2000, verbose = T, assay = "RNA")
+3. ScaleData - Scale all genes - ScaleData(seurat_object, assay = "RNA")
+4. RunPCA - ran PCA on all genes, not only the variable ones - RunPCA(seurat_object, npcs = 100, ndims.print = 1:5, nfeatures.print = 5,     reduction.name = reduction.name.pca, assay = "RNA")
+5. RunUMAP(seurat_object, dims = 1:ndims, reduction = reduction.name.pca,     reduction.name = reduction.name.umap)
+6. FindNeighbors(seurat_object, reduction = reduction.name.pca, dims = 1:ndims, k.param = 20, verbose = T)
+
+I guess they forgot to include the FindClusters function for RNA - possibly over-wrote it with the ADT FindClusters function
+
+For ADT- 
+1. Normalize the data - NormalizeData(so, assay = "ADT", normalization.method = "CLR")
+2. ScaleData -  ScaleData(so, assay = "ADT")
+3. RunPCA(object = so, assay = "ADT", reduction.name = reduction.name.pca)
+4. FindNeighbors(so, reduction = "pca_adt", dims = 1:ndims,     k.param = 20, verbose = T)
+5. RunUMAP(so, dims = 1:ndims, reduction = reduction.name.pca,     reduction.name = reduction.name.umap)
+6. FindClusters(so, resolution = 1, n.start = 10, algorithm = 1,     n.iter = 10)
+
+
+Our seurat_object doesn't have any PCA, since it was not saved with the object. Therefore, I re-ran the PCA using their previous data. This will allow us to find clusters as well as include other forms of dimensionality reduction.
+
+Normally I would run the PCA using only variable features, however by looking at the way they ran PCA, it is using all features. Therefore, I continue using all features.
+
+I would normally run like this: 
+```
+RunPCA(pc.genes = seurat_clust5@var.genes, npcs = 30, verbose = FALSE) )
+```
+
+# 2.A For RNA
+
+```{r}
+DefaultAssay(seurat_object) <- "RNA"
+seurat_object_high_clust <- seurat_object %>% ScaleData(assay = "RNA") %>% RunPCA(npcs = 100, ndims.print = 1:5, nfeatures.print = 5, reduction.name = "ImmgenPCA", assay = "RNA")
+
+ElbowPlot(seurat_object_high_clust, reduction = "ImmgenPCA")
+
+
+DefaultAssay(seurat_object_high_clust) <- "RNA"
+
+# Chose 13 based on the elbow plot. Real number of dims used not available
+seurat_object_high_clust <- FindNeighbors(seurat_object_high_clust, reduction = "ImmgenPCA", dims = 1:13, k.param = 20, verbose = T)
+
+seurat_object_high_clust <- FindClusters(seurat_object_high_clust, resolution = c(0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0), n.start = 10, algorithm = 1, n.iter = 10, cluster.name = "high_clust")
+```
+
+```{r}
+Idents(object = seurat_object_high_clust) <- "RNA_snn_res.1.8"
+DimPlot(seurat_object_high_clust, reduction = "umap_rna", label = TRUE, repel = TRUE)
+table(seurat_object_high_clust$Mouse_New, seurat_object_high_clust$RNA_snn_res.1.8)
+```
+
+# 2.A-2 Adding other Dimension Reduction Techniques
+
+```{r}
+# If we want other reduction techniques
+
+# Need to rename PCA in order to get FA2 to work
+seurat_object_high_clust@reductions[["pca"]] <- seurat_object_high_clust@reductions[["ImmgenPCA"]]
+
+seurat_object_high_clust <- seurat_object_high_clust %>% RunTSNE(dims.use = 1:13, reduction = "ImmgenPCA", reduction.name = "tsne_RNA") %>% DoopenTSNE(reduction_save = "openTSNE_RNA",dims_use = 1:13, reduction_use = "pca") %>% DoForceAtlas2(reduction_use = "pca", reduction_save = "fa2_RNA", dims_use = 1:13)
+```
+
+```{r}
+Idents(object = seurat_object_high_clust) <- "RNA_snn_res.1.8"
+DimPlot(seurat_object_high_clust, reduction = "umap_rna", label = TRUE, repel = TRUE)
+DimPlot(seurat_object_high_clust, reduction = "tsne", label = TRUE, repel = TRUE)
+DimPlot(seurat_object_high_clust, reduction = "openTSNE", label = TRUE, repel = TRUE)
+DimPlot(seurat_object_high_clust, reduction = "fa2", label = TRUE, repel = TRUE)
+```
+
+```{r}
+seurat_object_high_clust$RNA_highres_clust <- seurat_object_high_clust$RNA_snn_res.1.8
+```
+
+# 2.B For ADT
+
+```{r}
+DefaultAssay(seurat_object) <- "ADT"
+seurat_object_high_clust <- seurat_object_high_clust %>% ScaleData(assay = "ADT") %>% RunPCA(ndims.print = 1:5, nfeatures.print = 5, reduction.name = "ImmgenPCA_ADT", assay = "ADT")
+
+ElbowPlot(seurat_object_high_clust, reduction = "ImmgenPCA_ADT")
+
+DefaultAssay(seurat_object_high_clust) <- "ADT"
+
+# Chose 10 based on the elbow plot. Real number of dims used not available
+seurat_object_high_clust <- FindNeighbors(seurat_object_high_clust, reduction = "ImmgenPCA_ADT", dims = 1:10, k.param = 20, verbose = T)
+
+seurat_object_high_clust <- FindClusters(seurat_object_high_clust, resolution = c(0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0), n.start = 10, algorithm = 1, n.iter = 10, cluster.name = "ADT", graph.name = "ADT_snn")
+```
+
+```{r}
+Idents(object = seurat_object_high_clust) <- "ADT_snn_res.1.8"
+DimPlot(seurat_object_high_clust, reduction = "umap_rna", label = TRUE, repel = TRUE)
+table(seurat_object_high_clust$Mouse_New, seurat_object_high_clust$ADT_snn_res.1.8)
+
+table(seurat_object_high_clust$Mouse_New, seurat_object_high_clust$ADT_snn_res.1.8)
+```
+
+# 2.B-2 Adding other Dimension Reduction Techniques
+
+```{r}
+# If we want other reduction techniques
+
+# Need to rename PCA in order to get FA2 to work
+seurat_object_high_clust@reductions[["pca"]] <- seurat_object_high_clust@reductions[["ImmgenPCA_ADT"]]
+
+seurat_object_high_clust <- seurat_object_high_clust %>% RunTSNE(dims.use = 1:13, reduction = "ImmgenPCA_ADT", reduction.name = "tsne_ADT") %>% DoopenTSNE(reduction_save = "openTSNE_ADT",dims_use = 1:13, reduction_use = "pca") %>% DoForceAtlas2(reduction_use = "pca", reduction_save = "fa2_ADT", dims_use = 1:13)
+```
+
+```{r}
+#Idents(object = seurat_object_high_clust) <- "RNA_highres_clust"
+Idents(object = seurat_object_high_clust) <- "ADT_snn_res.1.8"
+DimPlot(seurat_object_high_clust, reduction = "umap_adt", label = TRUE, repel = TRUE)
+DimPlot(seurat_object_high_clust, reduction = "tsne_ADT", label = TRUE, repel = TRUE)
+DimPlot(seurat_object_high_clust, reduction = "openTSNE_ADT", label = TRUE, repel = TRUE)
+DimPlot(seurat_object_high_clust, reduction = "fa2_ADT", label = TRUE, repel = TRUE)
+```
+
+```{r}
+seurat_object_high_clust$ADT_highres_clust <- seurat_object_high_clust$ADT_snn_res.1.8
+```
+
+```
+# Remaking my Own Seurat Object
+
+# Therefore, I'm making a new seurat object from the counts matrix shown
+
+nate_seurat <- CreateSeuratObject(seurat_object[['RNA']]@counts, project = "SeuratProject", assay = "RNA",
+  min.cells = 0, min.features = 0, names.field = 1,
+  names.delim = "_", meta.data = NULL)
+
+adt_assay <- CreateAssayObject(counts = seurat_object[['ADT']]@counts)
+
+# add this assay to the previously created Seurat object
+nate_seurat[["ADT"]] <- adt_assay
+```
+
+# 2.C Save New RDS
+```
+saveRDS(seurat_object_high_clust, file = paste0(data_dir, "seurat_object_high_res.rds"))
+```

@@ -22,6 +22,7 @@ library(celldex)
 library(scRNAseq)
 library(scran)
 library(gridExtra)
+library(cowplot)
 
 data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
 
@@ -124,7 +125,8 @@ Idents(seurat_object) <- 'sample_name'
 print("Here we added more characterizing metafeatures to the object for analysis. Now the list of features is: ")
 print(colnames(seurat_object@meta.data))
 ```
-Remove cells without Mouse/Organ information
+
+# Remove cells without Mouse/Organ information
 ```{r}
 table(seurat_object$Mouse %in% c('mouse0082', 'mouse0080', 'mouse0081'))
 table(seurat_object$Organ %in% c('Lung', "mLns", "Colon"))
@@ -134,21 +136,7 @@ table(seurat_object$Organ %in% c('Lung', "mLns", "Colon"))
 seurat_object <- seurat_object[,seurat_object$Mouse %in% c('mouse0082', 'mouse0080', 'mouse0081'),]
 ```
 
-# Save New Metadata
-```{r}
-saveRDS(seurat_object, file = paste0(data_dir, "dataset_clean_scRNA_ADT_new_metadata.rds"))
-```
-
-# MAYBE WE DON'T WANT TO DO THIS - NORMALLY BAD WITH PATIENT DATA
-```
-# Removing cells with incomplete metadata
-bad_cells <- rownames(seurat_object@meta.data[!complete.cases(seurat_object@meta.data), ])
-seurat_object <- seurat_object[,!colnames(seurat_object) %in% bad_cells]
-#length(bad_cells) # Removes 72 cells
-```
-
-
-Removing cells that have incomplete cases. This removed 72 "bad" cells from the seurat object.
+Now we have 11,830 cells
 
 Identifying RNA Outliers
 ```{r}
@@ -158,25 +146,41 @@ Identifying RNA Outliers
 # nCount_RNA - the total number of molecules detected within a cell
 # nFeature_RNA - the number of genes detected within a cell
 
-hist(colSums(seurat_object[["RNA"]]), xlab = "Sum of Columns - RNA", ylab = "Frequency", col = "blue")
+#hist(colSums(seurat_object[["RNA"]]), xlab = "Sum of Columns - RNA", ylab = "Frequency", col = "blue")
 
-hist(seurat_object$nCount_RNA, xlab = "nCount RNA - number of molecules/cell", ylab = "Frequency", col = "blue")
+#hist(seurat_object$nCount_RNA, xlab = "nCount RNA - number of molecules/cell", ylab = "Frequency", col = "blue")
 
-hist(seurat_object$nFeature_RNA, xlab = "nFeature RNA - number of unique genes detected/cell", ylab = "Frequency", col = "blue")
+#hist(seurat_object$nFeature_RNA, xlab = "nFeature RNA - number of unique genes detected/cell", ylab = "Frequency", col = "blue")
 
 # How does nCount_RNA differ from the colSums(seurat_object[["RNA"]])??
 
 # Identify outliers based on unique genes and counts using the log-transformed nCount_RNA and nFeature_RNA that are more than 3 MADs (median absolute deviations) away from the median.
-qc.nCount_RNA <- isOutlier(seurat_object$nCount_RNA, log=TRUE, type="both")
+qc.nCount_RNA <- isOutlier(seurat_object$nCount_RNA, log=TRUE, type="both", nmad = 4)
 paste("The thresholds for 3 MADs from the median for nCount_RNA are: ")
 attr(qc.nCount_RNA, "thresholds")
 
-qc.nFeature_RNA  <- isOutlier(seurat_object$nFeature_RNA, log=TRUE, type="both")
+qc.nFeature_RNA  <- isOutlier(seurat_object$nFeature_RNA, log=TRUE, type="both", nmad = 4)
 paste("The thresholds for 3 MADs from the median for nFeature_RNA are: ")
 attr(qc.nFeature_RNA, "thresholds")
 
 paste0("The total number of cells removed using these outliers are: ", ncol(seurat_object) - ncol(subset(seurat_object, subset = nCount_RNA >= attr(qc.nCount_RNA, "thresholds")["lower"] & nCount_RNA <= attr(qc.nCount_RNA, "thresholds")["higher"] & nFeature_RNA >= attr(qc.nFeature_RNA, "thresholds")["lower"] & nFeature_RNA <= attr(qc.nFeature_RNA, "thresholds")["higher"])))
 ```
+
+```{r}
+# ADT QC
+
+qc.nCount_ADT <- isOutlier(seurat_object$nCount_ADT, log=TRUE, type="both", nmad = 4)
+paste("The thresholds for 3 MADs from the median for nCount_ADT are: ")
+attr(qc.nCount_ADT, "thresholds")
+
+qc.nFeature_ADT  <- isOutlier(seurat_object$nFeature_ADT, log=TRUE, type="both", nmad = 4)
+paste("The thresholds for 3 MADs from the median for nFeature_ADT are: ")
+attr(qc.nFeature_ADT, "thresholds")
+
+paste0("The total number of cells removed using these outliers are: ", ncol(seurat_object) - ncol(subset(seurat_object, subset = nCount_ADT >= attr(qc.nCount_ADT, "thresholds")["lower"] & nCount_ADT <= attr(qc.nCount_ADT, "thresholds")["higher"] & nFeature_ADT >= attr(qc.nFeature_ADT, "thresholds")["lower"] & nFeature_ADT <= attr(qc.nFeature_ADT, "thresholds")["higher"])))
+```
+
+
 Check for Mitochondrial Genes in RNA
 ```{r}
 # Check for mitochondrial genes - No mitochondrial genes
@@ -184,11 +188,11 @@ DefaultAssay(object = seurat_object) <- "RNA"
 print("The number of mitochondrial genes in the RNA assay is: ")
 length(grep("^MT", lapply(rownames(seurat_object[["RNA"]]), toupper))) # There are 113 mitochondrial genes
 
-seurat_object[["percent.mt"]] <- PercentageFeatureSet(seurat_object, pattern = "^MT-")
+seurat_object[["percent.mt"]] <- PercentageFeatureSet(seurat_object, pattern = "^mt-")
 ```
 
 Checking RNA Outliers Visually
-```{r}
+```
 # Graph / Visual QC
 
 # Feature and Count for RNA
@@ -202,6 +206,53 @@ p3 <- VlnPlot(seurat_object, features = c("percent.mt"), group.by = "sample_name
 grid.arrange(p1, p2, p3, ncol = 3)
 ```
 
+Check for Mitochondrial Genes in Cite-Seq / ADT
+```{r}
+# Check for mitochondrial genes - No mitochondrial genes
+print("The number of mitochondrial genes in the RNA assay is: ")
+length(grep("^MT", lapply(rownames(seurat_object[["ADT"]]), toupper))) # There are no mitochondrial genes in the Cite-Seq Assay
+```
+
+Checking Outliers Visually
+
+Post-normalization and scaling, everything looks pretty similar and normally distributed. However, the only thing that doesn't look similar across samples is the number of features for the ADT/Cite-Seq assay in comparison of each organ. nCount_ADT is the total number of antibodies found on a cell. nFeature_ADT is the number of unique antibodies detected. Both seem to have a higher average in the lung compared to the colon and mLns.
+
+
+# Supplemental Figure 1 - Visualize QC
+```{r}
+Idents(seurat_object) <- 'sample_name'
+
+p1 <- RidgePlot(seurat_object, features = c("nFeature_RNA")) + geom_vline(xintercept = attr(qc.nFeature_RNA, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_vline(xintercept = attr(qc.nFeature_RNA, "thresholds")["higher"], linetype = "dashed", color = "blue", size = 1.5) + NoLegend()
+
+p2 <- RidgePlot(seurat_object, features = c("nCount_RNA")) + geom_vline(xintercept = attr(qc.nCount_RNA, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_vline(xintercept = attr(qc.nCount_RNA, "thresholds")["higher"] , linetype = "dashed", color = "blue", size = 1.5) + NoLegend()
+
+p3 <- RidgePlot(seurat_object, features = c("nFeature_ADT")) + geom_vline(xintercept = attr(qc.nFeature_ADT, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_vline(xintercept = attr(qc.nFeature_ADT, "thresholds")["higher"] , linetype = "dashed", color = "blue", size = 1.5) + NoLegend()
+
+p4 <- RidgePlot(seurat_object, features = c("nCount_ADT")) + geom_vline(xintercept = attr(qc.nCount_ADT, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_vline(xintercept = attr(qc.nCount_ADT, "thresholds")["higher"] , linetype = "dashed", color = "blue", size = 1.5) + NoLegend()
+
+p5 <- FeatureScatter(seurat_object, feature1 = "nCount_RNA", feature2 = "nFeature_RNA") + geom_vline(xintercept = attr(qc.nCount_RNA, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_vline(xintercept = attr(qc.nCount_RNA, "thresholds")["higher"], linetype = "dashed", color = "blue", size = 1.5) + geom_hline(yintercept = attr(qc.nFeature_RNA, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_hline(yintercept = attr(qc.nFeature_RNA, "thresholds")["higher"] , linetype = "dashed", color = "blue", size = 1.5) + NoLegend()
+
+
+
+p6 <- FeatureScatter(seurat_object, feature1 = "nCount_ADT", feature2 = "nFeature_ADT") + geom_vline(xintercept = attr(qc.nCount_ADT, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_vline(xintercept = attr(qc.nCount_ADT, "thresholds")["higher"], linetype = "dashed", color = "blue", size = 1.5) + geom_hline(yintercept = attr(qc.nFeature_ADT, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_hline(yintercept = attr(qc.nFeature_ADT, "thresholds")["higher"] , linetype = "dashed", color = "blue", size = 1.5) + NoLegend()
+
+grid_qc <- cowplot::plot_grid(p1, p3, p2, p4, p5, p6, labels = c("A", "D", "B", "E", "C", "F"), ncol =2)
+
+title_gg <- ggplot() + 
+  labs(title = "Pre-QC Thresholds")
+
+supp1 <- plot_grid(title_gg, grid_qc, ncol = 1, rel_heights = c(0.1, 1))
+```
+```{r}
+
+fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
+
+ggsave(filename = paste0(fig_directory, "supplemental_1.pdf"), plot = supp1, device = "pdf", height = 10, width = 8)
+
+ggsave(filename = paste0(fig_directory, "supplemental_1.jpeg"), plot = supp1, device = "jpeg", height = 10, width = 8)
+```
+
+
 Subsetting Object based on RNA Outliers
 ```{r}
 seurat_object <- subset(seurat_object, subset = nCount_RNA >= attr(qc.nCount_RNA, "thresholds")["lower"] & nCount_RNA <= attr(qc.nCount_RNA, "thresholds")["higher"] & nFeature_RNA >= attr(qc.nFeature_RNA, "thresholds")["lower"] & nFeature_RNA <= attr(qc.nFeature_RNA, "thresholds")["higher"])
@@ -212,50 +263,8 @@ paste0("The new range of the nFeature_RNA in cells is: ", range(seurat_object$nF
 paste0("Now we are left with this number of cells: ", ncol(seurat_object))
 ```
 
-Check for Mitochondrial Genes in Cite-Seq / ADT
-```{r}
-# Check for mitochondrial genes - No mitochondrial genes
-print("The number of mitochondrial genes in the RNA assay is: ")
-length(grep("^MT", lapply(rownames(seurat_object[["ADT"]]), toupper))) # There are no mitochondrial genes in the Cite-Seq Assay
-```
 
-Identifying Cite-Seq / ADT Outliers
-```{r}
-# Cite-Seq / ADT Outliers
-#summary(colSums(seurat_object[["ADT"]]))
-hist(colSums(seurat_object[["ADT"]]), xlab = "Sum of Columns - ADT", ylab = "Frequency", col = "blue")
 
-hist(seurat_object$nCount_ADT, xlab = "nCount ADT - number of antibodies/cell", ylab = "Frequency", col = "blue")
-
-hist(seurat_object$nFeature_ADT, xlab = "nFeature ADT - number of unique antibodies detected/cell", ylab = "Frequency", col = "blue")
-
-# Identify outliers based on unique genes and counts using the log-transformed nCount_ADT and nFeature_ADT that are more than 3 MADs (median absolute deviations) away from the median.
-qc.nCount_ADT <- isOutlier(seurat_object$nCount_ADT, log=TRUE, type="both")
-paste("The thresholds for 3 MADs from the median for nCount_ADT are: ")
-attr(qc.nCount_ADT, "thresholds")
-
-qc.nFeature_ADT  <- isOutlier(seurat_object$nFeature_ADT, log=TRUE, type="both")
-paste("The thresholds for 3 MADs from the median for nFeature_ADT are: ")
-attr(qc.nFeature_ADT, "thresholds")
-
-# Shows that 327 cells would be removed by this
-paste0("The total number of cells removed using these outliers are: ", ncol(seurat_object) - ncol(subset(seurat_object, subset = nCount_ADT >= attr(qc.nCount_ADT, "thresholds")["lower"] & nCount_ADT <= attr(qc.nCount_ADT, "thresholds")["higher"] & nFeature_ADT >= attr(qc.nFeature_ADT, "thresholds")["lower"] & nFeature_ADT <= attr(qc.nFeature_ADT, "thresholds")["higher"])))
-```
-
-Checking ADT Outliers Visually
-```{r}
-# Graph / Visual QC
-
-# Feature and Count for RNA
-
-p1 <- VlnPlot(seurat_object, features = c("nFeature_ADT"), group.by = "sample_name", assay = "ADT") + geom_hline(yintercept = c(attr(qc.nFeature_ADT, "thresholds")["lower"], attr(qc.nFeature_ADT, "thresholds")["higher"]), linetype = "dashed", color = "red") + ggtitle("nFeature_ADT with Outliers") + theme(legend.position = "none")
-
-p2 <- VlnPlot(seurat_object, features = c("nCount_ADT"), group.by = "sample_name", assay = "ADT") + geom_hline(yintercept = c(attr(qc.nCount_ADT, "thresholds")["lower"], attr(qc.nCount_ADT, "thresholds")["higher"]), linetype = "dashed", color = "red") + ggtitle("nCount_ADT with Outliers")
-
-grid.arrange(p1, p2, ncol = 2)
-```
-
-Post-normalization and scaling, everything looks pretty similar and normally distributed. However, the only thing that doesn't look similar across samples is the number of features for the ADT/Cite-Seq assay in comparison of each organ. nCount_ADT is the total number of antibodies found on a cell. nFeature_ADT is the number of unique antibodies detected. Both seem to have a higher average in the lung compared to the colon and mLns.
 
 Subsetting Object based on Cite-Seq / ADT Outliers
 ```{r}
@@ -267,18 +276,40 @@ paste0("The new range of the nCount_ADT in cells is: ", range(seurat_object$nFea
 paste0("Now we are left with this number of cells: ", ncol(seurat_object))
 ```
 
-Check for Mitochondrial Genes in ADT
+# Supplemental Figure 2 - Visualize QC DONE
 ```{r}
-# Mitochondrial reads
-print("The number of mitochondrial proteins in the ADT assay is: ")
-grep("^MT", rownames(seurat_object[["ADT"]]))
-#seurat_object[["percent.mt"]] <- PercentageFeatureSet(seurat_object, pattern = "^MT-")
-#table(PercentageFeatureSet(seurat_object, pattern = "^MT-", assay = "ADT"))
+Idents(seurat_object) <- 'sample_name'
 
-seurat_object[["percent.mt"]] <- PercentageFeatureSet(seurat_object, pattern = "^MT-")
+p1 <- RidgePlot(seurat_object, features = c("nFeature_RNA")) + geom_vline(xintercept = attr(qc.nFeature_RNA, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_vline(xintercept = attr(qc.nFeature_RNA, "thresholds")["higher"], linetype = "dashed", color = "blue", size = 1.5) + NoLegend()
+
+p2 <- RidgePlot(seurat_object, features = c("nCount_RNA")) + geom_vline(xintercept = attr(qc.nCount_RNA, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_vline(xintercept = attr(qc.nCount_RNA, "thresholds")["higher"] , linetype = "dashed", color = "blue", size = 1.5) + NoLegend()
+
+p3 <- RidgePlot(seurat_object, features = c("nFeature_ADT")) + geom_vline(xintercept = attr(qc.nFeature_ADT, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_vline(xintercept = attr(qc.nFeature_ADT, "thresholds")["higher"] , linetype = "dashed", color = "blue", size = 1.5) + NoLegend()
+
+p4 <- RidgePlot(seurat_object, features = c("nCount_ADT")) + geom_vline(xintercept = attr(qc.nCount_ADT, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_vline(xintercept = attr(qc.nCount_ADT, "thresholds")["higher"] , linetype = "dashed", color = "blue", size = 1.5) + NoLegend()
+
+p5 <- FeatureScatter(seurat_object, feature1 = "nCount_RNA", feature2 = "nFeature_RNA") + geom_vline(xintercept = attr(qc.nCount_RNA, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_vline(xintercept = attr(qc.nCount_RNA, "thresholds")["higher"], linetype = "dashed", color = "blue", size = 1.5) + geom_hline(yintercept = attr(qc.nFeature_RNA, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_hline(yintercept = attr(qc.nFeature_RNA, "thresholds")["higher"] , linetype = "dashed", color = "blue", size = 1.5) + NoLegend()
+
+
+
+p6 <- FeatureScatter(seurat_object, feature1 = "nCount_ADT", feature2 = "nFeature_ADT") + geom_vline(xintercept = attr(qc.nCount_ADT, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_vline(xintercept = attr(qc.nCount_ADT, "thresholds")["higher"], linetype = "dashed", color = "blue", size = 1.5) + geom_hline(yintercept = attr(qc.nFeature_ADT, "thresholds")["lower"], linetype = "dashed", color = "red", size = 1.5) + geom_hline(yintercept = attr(qc.nFeature_ADT, "thresholds")["higher"] , linetype = "dashed", color = "blue", size = 1.5) + NoLegend()
+
+grid_qc <- cowplot::plot_grid(p1, p3, p2, p4, p5, p6, labels = c("A", "D", "B", "E", "C", "F"), ncol =2)
+
+title_gg <- ggplot() + 
+  labs(title = "Post-QC Thresholds")
+
+supp2 <- plot_grid(title_gg, grid_qc, ncol = 1, rel_heights = c(0.1, 1))
 ```
 
-Question - Based on the fact that biological data should be distributed normally, are we okay with using the median +/- 3*STDEV as the cutoff for outlier cells within both the RNA and ADT?
+```{r}
+fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
+
+ggsave(filename = paste0(fig_directory, "supplemental_2.pdf"), plot = supp2, device = "pdf", height = 10, width = 8)
+
+ggsave(filename = paste0(fig_directory, "supplemental_2.jpeg"), plot = supp2, device = "jpeg", height = 10, width = 8)
+```
+
 
 # Demultiplex using HTOs
 
@@ -286,31 +317,6 @@ This was already done for us, so we don't need most likely.
 
 ```
 table(seurat_object$HTO_classification.simplified, seurat_object$sample_name)
-
-```
-
-Additional QC Plots
-```{r}
-Idents(seurat_object) <- 'sample_name'
-
-p1 <- RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 2)
-
-Idents(seurat_object) <- 'Organ'
-
-p2 <- RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 2)
-
-Idents(seurat_object) <- 'Mouse'
-
-p3 <- RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 2)
-
-Idents(seurat_object) <- 'Infection'
-
-p4 <- RidgePlot(seurat_object, features = c("nFeature_RNA", "nCount_RNA", "nFeature_ADT", "nCount_ADT"), ncol = 2)
-
-grid.arrange(p1, p2, p3, p4, ncol = 2)
-
-FeatureScatter(seurat_object, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
-FeatureScatter(seurat_object, feature1 = "nCount_ADT", feature2 = "nFeature_ADT")
 ```
 
 # Normalization Check
@@ -570,7 +576,52 @@ table(seurat_object[["Protein_clusters"]])
 ```
 
 ```{r}
-#setwd(data_dir)
+setwd(data_dir)
 #save.image(file='Candida_post_QC.RData')
-saveRDS(seurat_object, file = "dataset_post_QC.rds")
+#saveRDS(seurat_object, file = "dataset_post_QC.rds")
 ```
+
+
+# Making Latex Tables
+
+```{r}
+library(xtable)
+
+seurat_object1@assays[["qc_stats_1"]]
+
+latex_table <- xtable(seurat_object1@assays[["qc_stats_1"]], caption = "HTO Assay QC Results", label = "tab:sample")
+
+# Print the LaTeX code
+print(latex_table, caption.placement = "top", include.rownames = FALSE)
+
+latex_table2 <- xtable(as.data.frame(seurat_object1@assays[["qc_stats_2"]]), caption = "RNA Assay QC Results", label = "tab:sample")
+
+# Print the LaTeX code
+print(latex_table2, caption.placement = "top", include.rownames = FALSE)
+
+latex_table3 <- xtable(seurat_object1@assays[["qc_stats_4_preADTfiltering"]], caption = "Surface Protein Assay QC Results", label = "tab:sample")
+
+# Print the LaTeX code
+print(latex_table3, caption.placement = "top", include.rownames = FALSE)
+
+
+```
+
+# Seurat Object Normalization, Clustering and Reduction
+
+
+```
+seurat_object <- seurat_object %>% NormalizeData(verbose = FALSE) %>% FindVariableFeatures(selection.method = "vst", nfeatures = 2000) %>% ScaleData(verbose = TRUE)
+seurat_object <- seurat_object %>% RunPCA(pc.genes = seurat_object@var.genes, npcs = 50, verbose = FALSE)
+  
+
+#ElbowPlot(seurat_object, ndims = 50)
+
+seurat_object <- seurat_object %>% RunUMAP(dims = 1:15, reduction.name = "umap_both_") %>% RunTSNE(dims = 1:15, reduction.name = "tsne_both_") %>% FindNeighbors(dims = 1:15,compute.SNN=TRUE) %>% DoopenTSNE(reduction_save = "openTSNE_both_", dims_use = 1:15) %>% DoForceAtlas2(reduction_use = "pca", reduction_save = "fa2_both_", dims_use = 1:15)
+```
+
+```{r}
+#saveRDS(seurat_object, file = paste0(data_dir, "dataset_post_QC.rds"))
+```
+
+

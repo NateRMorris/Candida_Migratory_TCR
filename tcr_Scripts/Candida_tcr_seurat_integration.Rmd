@@ -20,12 +20,7 @@ setwd(data_dir)
 
 Here, we use the pre-existing seurat object.
 ```{r}
-seurat_object_prefiltered <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT_new_metadata.Rds"))
-
-#seurat_object_WNN <- readRDS("Candida_ds_clean_WNN.rds") # I didn't include WNN analysis in this document
-#seurat_object <- readRDS(file = paste0(data_dir, "dataset_post_sc_Analysis.rds")) #If you want without WNN Clusters and without TCR Information
-
-#seurat_object_pseudo <- readRDS(file = paste0(data_dir, "pseudotime_seurat.rds"))
+seurat_object <- readRDS(file = paste0(data_dir, "/dataset_w_annot.rds"))
 ```
 
 And we get the object containing our filtered TCR data
@@ -48,83 +43,74 @@ library(stringdist)
 library(patchwork)
 library(djvdj)
 library(data.table)
+library(reticulate)
+library(ReductionWrappers)
+library(paletteer)
 ```
 
 # 4. IGT27_TCR - Seurat Object Analysis Integration (TCR Filtered)
 
 ## 4.A - Adding TCR Metadata
 ```{r}
-DefaultAssay(seurat_object_prefiltered) <- "RNA"
+DefaultAssay(seurat_object) <- "RNA"
 
-seurat_object_prefiltered@meta.data[["TCR"]] <- seurat_object_prefiltered@meta.data[["cell_barcode"]] %in% IGT27_TCR$Barcode
+seurat_object@meta.data[["TCR"]] <- seurat_object@meta.data[["cell_barcode"]] %in% IGT27_TCR$Barcode
 
-seurat_object_prefiltered$clonotype_frequency <- IGT27_TCR[match(seurat_object_prefiltered@meta.data[["cell_barcode"]], IGT27_TCR$Barcode),]$Clonotype_frequency
+seurat_object$clonotype_frequency <- IGT27_TCR[match(seurat_object@meta.data[["cell_barcode"]], IGT27_TCR$Barcode),]$Clonotype_frequency
 
-seurat_object_prefiltered$clonotype_frequency[is.na(seurat_object_prefiltered$clonotype_frequency)] <- 0
-
-
-```
-
-
-## Creating New Seurat Object with all cells and TCR information
-```{r}
-seurat_object_new <- seurat_object_prefiltered %>% NormalizeData(verbose = FALSE) %>% FindVariableFeatures(selection.method = "vst", nfeatures = 4000) %>% ScaleData(verbose = TRUE)
-seurat_object_new_new <- seurat_object_new %>% RunPCA(pc.genes = t_cells@var.genes, npcs = 30, verbose = FALSE) %>% RunUMAP(dims = 1:25) %>% RunTSNE(dims = 1:25) %>% FindNeighbors(dims = 1:25,compute.SNN=TRUE) %>% FindClusters(resolution = c(0.1,0.2,0.4,0.8,1)) %>% DoopenTSNE(reduction_save = "openTSNE",dims_use = 1:25) 
-
-
+seurat_object$clonotype_frequency[is.na(seurat_object$clonotype_frequency)] <- 0
 ```
 
 ```{r}
-seurat_object_new_new$clonotype <- IGT27_TCR[match(seurat_object_new_new@meta.data[["cell_barcode"]], IGT27_TCR$Barcode),]$clonotype
+seurat_object$clonotype <- IGT27_TCR[match(seurat_object@meta.data[["cell_barcode"]], IGT27_TCR$Barcode),]$clonotype
 
-table(rev(sort(table(seurat_object_new_new$clonotype))))
+table(rev(sort(table(seurat_object$clonotype))))
 
-Idents(object = seurat_object_new_new) <- "clonotype"
+Idents(object = seurat_object) <- "clonotype"
 
-seurat_object_new_new$clonotype_frequency <- IGT27_TCR[match(seurat_object_new_new@meta.data[["cell_barcode"]], IGT27_TCR$Barcode),]$Clonotype_frequency
+seurat_object$clonotype_frequency <- IGT27_TCR[match(seurat_object@meta.data[["cell_barcode"]], IGT27_TCR$Barcode),]$Clonotype_frequency
 
-table(rev(sort(table(seurat_object_new_new$clonotype))))
+table(rev(sort(table(seurat_object$clonotype))))
 
-seurat_object_new_new@meta.data[["paired_across_organ"]] <- seurat_object_new_new@meta.data[["cell_barcode"]] %in% IGT27_TCR$Barcode[IGT27_TCR$paired_across_organ == TRUE]
+seurat_object@meta.data[["paired_across_organ"]] <- seurat_object@meta.data[["cell_barcode"]] %in% IGT27_TCR$Barcode[IGT27_TCR$paired_across_organ == TRUE]
 
-Idents(object = seurat_object.TCR) <- "paired_across_organ"
+Idents(object = seurat_object) <- "paired_across_organ"
 
-seurat_object_new_new@meta.data[["paired_across_organ"]]<- as.factor(seurat_object_new_new$paired_across_organ)
+seurat_object@meta.data[["paired_across_organ"]]<- as.factor(seurat_object$paired_across_organ)
 
-seurat_object_new_new@meta.data[["duplicate"]] <- seurat_object_new_new@meta.data[["cell_barcode"]] %in% IGT27_TCR$Barcode[IGT27_TCR$duplicate == TRUE]
+seurat_object@meta.data[["duplicate"]] <- seurat_object@meta.data[["cell_barcode"]] %in% IGT27_TCR$Barcode[IGT27_TCR$duplicate == TRUE]
 
-Idents(object = seurat_object_new_new) <- "duplicate"
+Idents(object = seurat_object) <- "duplicate"
 
-seurat_object_new_new@meta.data[["duplicate"]]<- as.factor(seurat_object_new_new$duplicate)
+seurat_object@meta.data[["duplicate"]]<- as.factor(seurat_object$duplicate)
 ```
 
 ```{r}
-#DimPlot(seurat_object_new_new, reduction = "umap_rna", group.by = "TCR") + ggtitle("TCR Seq by RNA UMAP")
+DimPlot(seurat_object, reduction = "umap_rna", group.by = "TCR") + ggtitle("TCR Seq by RNA UMAP") + NoLegend()
 
-DimPlot(seurat_object_new_new, reduction = "openTSNE", group.by = "RNA_clusters", label = TRUE, split.by = "Infection")
+DimPlot(seurat_object, reduction = "umap_rna", group.by = "CD_annot", label = TRUE, label.size = 1.5, label.box = TRUE, repel = TRUE) + NoLegend()
+
+DimPlot(seurat_object, reduction = "umap_both_", group.by = "CD_annot", label = TRUE, label.size = 1.5, label.box = TRUE, repel = TRUE) + NoLegend()
 ```
 
 
 ```{r}
-DimPlot(seurat_object_new_new, reduction = "umap_rna", group.by = "TCR") + ggtitle("TCR Seq by RNA UMAP")
-DimPlot(seurat_object_new_new, reduction = "umap_rna", group.by = "TCR", split.by = "Infection") + ggtitle("TCR Seq by RNA UMAP")
-
-DimPlot(seurat_object_new_new, reduction = "openTSNE", group.by = "TCR") + ggtitle("TCR Seq by RNA UMAP")
-DimPlot(seurat_object_new_new, reduction = "openTSNE", group.by = "TCR", split.by = "Infection") + ggtitle("TCR Seq by RNA UMAP")
+DimPlot(seurat_object, reduction = "umap_rna", group.by = "TCR") + ggtitle("TCR Seq by RNA UMAP")
+DimPlot(seurat_object, reduction = "umap_rna", group.by = "TCR", split.by = "Infection") + ggtitle("TCR Seq by RNA UMAP")
 ```
 
 
-```{r}
+```
 #setwd(data_dir)
-saveRDS(seurat_object_new_new, file = paste0(data_dir, "seurat_new_12_08.rds"))
+saveRDS(seurat_object, file = paste0(data_dir, "seurat_new_12_08.rds"))
 ```
 
 
 # Adding for Only TCR samples
 ```{r}
-Idents(object = seurat_object_prefiltered) <- "TCR"
+Idents(object = seurat_object) <- "TCR"
 
-seurat_object.TCR <- subset(x = seurat_object_prefiltered, subset = (TCR == TRUE))
+seurat_object.TCR <- subset(x = seurat_object, subset = (TCR == TRUE))
 
 seurat_object.TCR$clonotype <- IGT27_TCR[match(seurat_object.TCR@meta.data[["cell_barcode"]], IGT27_TCR$Barcode),]$clonotype
 
@@ -157,7 +143,6 @@ This is proven here.
 table(IGT27_TCR$RNA_clusters[IGT27_TCR$clonotype == names(which(table(seurat_object.TCR$clonotype) == 10))], useNA = "ifany")
 ```
 
-10/3/2023 Break
 
 ## 4.B - Simple TCR QC
 
@@ -174,8 +159,8 @@ Therefore, there are a majority unique clonotypes, and a maximum number of proli
 
 This shows that the TCR cells are spread throughout the different T-cell states (CD4 and CD8)
 ```{r}
-DimPlot(seurat_object_prefiltered, reduction = "umap_rna", group.by = "TCR") + ggtitle("TCR Seq by RNA UMAP")
-DimPlot(seurat_object_prefiltered, reduction = "umap_rna", group.by = "TCR", split.by = "Infection") + ggtitle("TCR Seq by RNA UMAP")
+DimPlot(seurat_object, reduction = "umap_rna", group.by = "TCR") + ggtitle("TCR Seq by RNA UMAP")
+DimPlot(seurat_object, reduction = "umap_rna", group.by = "TCR", split.by = "Infection") + ggtitle("TCR Seq by RNA UMAP")
 #DimPlot(seurat_object, reduction = "wnn.umap", group.by = "TCR") + ggtitle("TCR Seq by WNN UMAP")
 ```
 
@@ -203,7 +188,7 @@ For here, if we choose to use our seurat_object.TCR, then we get the % of all TC
 However, if we use the seurat_object_prefiltered, then we get the % of all cells that have n = 0, n = 1, n = 2 and n > 3 proliferation.
 
 ```{r}
-TCR_clonotype_freq <- as.data.frame(table(seurat_object_prefiltered$clonotype_frequency, seurat_object_prefiltered$Mouse_New))
+TCR_clonotype_freq <- as.data.frame(table(seurat_object$clonotype_frequency, seurat_object$Mouse_New))
 colnames(TCR_clonotype_freq)[1] <- "Clonotype_Freq"
 colnames(TCR_clonotype_freq)[2] <- "Mouse"
 
@@ -236,21 +221,23 @@ ggplot(TCR_clonotype_freq_percentages_long, aes(x = Mouse, y = Percentage, fill 
 
 level_order <- c('No TCR', 'n = 1', 'n = 2', 'n > 3') 
 
+TCR_clonotype_freq_percentages_long <- TCR_clonotype_freq_percentages_long[TCR_clonotype_freq_percentages_long$Clonotype != "No TCR",]
+
 # Plot the faceted barplot
-ggplot(TCR_clonotype_freq_percentages_long, aes(factor(Clonotype, level = level_order), y = Percentage, fill = Clonotype)) +
+prolif_perc <- ggplot(TCR_clonotype_freq_percentages_long, aes(factor(Clonotype, level = level_order), y = Percentage, fill = Clonotype)) +
   geom_bar(stat = "identity") +
   geom_text(aes(label = substr(as.character(Percentage), 0, 4)), position = position_stack(vjust = 0.5), angle = 45, size = 6) +
-  labs(title = "Stacked Barplot of Frequency Percentages by Mouse",
-       x = "Size of Clonotype for each Cell",
+  labs(title = "Frequency of Clonotype Sizes by Mouse",
+       x = "Size of Clonotype",
        y = "Percentage of all Cells",
        fill = "Number of Cells with identical Clonotype") +
-  theme(legend.position = "right", axis.text.x = element_text(angle = 45, hjust=1)) + facet_wrap( ~ Mouse)
+  theme(legend.position = "bottom", axis.text.x = element_text(angle = 45, hjust=1)) + facet_wrap( ~ Mouse)
 ```
 
 ## 4.C-3 Clonotype Freq Group by Cluster
 
 ```{r}
-TCR_clonotype_freq <- as.data.frame(table(seurat_object_prefiltered$clonotype_frequency, seurat_object_prefiltered$RNA_clusters))
+TCR_clonotype_freq <- as.data.frame(table(seurat_object$clonotype_frequency, seurat_object$CD_annot))
 colnames(TCR_clonotype_freq)[1] <- "Clonotype_Freq"
 colnames(TCR_clonotype_freq)[2] <- "Cluster"
 
@@ -295,13 +282,14 @@ ggplot(TCR_clonotype_freq_percentages_long, aes(factor(Clonotype, level = level_
   theme(legend.position = "right", axis.text.x = element_text(angle = 45, hjust=1)) + facet_wrap( ~ Cluster)
 ```
 
+
 ## 4.C UMAP with Clonotype Frequency Scores as Sizes
 
 ```{r}
 # Only showing cells with proliferating Clonotypes
-DimPlot(seurat_object.TCR[,seurat_object.TCR$clonotype_frequency > 1], reduction = "umap_rna", group.by = "RNA_clusters", split.by = "Infection", pt.size = (seurat_object.TCR[,seurat_object.TCR$clonotype_frequency > 1]$clonotype_frequency)*0.6, shape.by = "paired_across_organ") + ggtitle("Proliferated Clonotypes - Color by Cluster, Size by # of Cells with same Clonotype, Shape by Migratory") + theme(plot.title = element_text(size = 7, face = "bold"))
+DimPlot(seurat_object.TCR[,seurat_object.TCR$clonotype_frequency > 1], reduction = "umap_rna", group.by = "CD_annot", split.by = "Infection", pt.size = (seurat_object.TCR[,seurat_object.TCR$clonotype_frequency > 1]$clonotype_frequency)*0.6, shape.by = "paired_across_organ") + ggtitle("Proliferated Clonotypes - Color by Cluster, Size by # of Cells with same Clonotype, Shape by Migratory") + theme(plot.title = element_text(size = 7, face = "bold"))
 
-DimPlot(seurat_object.TCR[,seurat_object.TCR$clonotype_frequency > 2], reduction = "umap_rna", group.by = "RNA_clusters", split.by = "Infection", pt.size = (seurat_object.TCR[,seurat_object.TCR$clonotype_frequency > 2]$clonotype_frequency)*0.6, shape.by = "paired_across_organ") + ggtitle("Proliferated Clonotypes - Color by Cluster, Size by # of Cells with same Clonotype, Shape by Migratory") + theme(plot.title = element_text(size = 7, face = "bold"))
+DimPlot(seurat_object.TCR[,seurat_object.TCR$clonotype_frequency > 2], reduction = "umap_rna", group.by = "CD_annot", split.by = "Infection", pt.size = (seurat_object.TCR[,seurat_object.TCR$clonotype_frequency > 2]$clonotype_frequency)*0.6, shape.by = "paired_across_organ") + ggtitle("Proliferated Clonotypes - Color by Cluster, Size by # of Cells with same Clonotype, Shape by Migratory") + theme(plot.title = element_text(size = 7, face = "bold"))
 
 #ggtitle("<span style='font-size: 10pt;'>Proliferated Clonotypes - Color by Cluster, Size by # of Cells with same Clonotype, Shape by Migratory.</font>")
 ```
@@ -309,23 +297,23 @@ DimPlot(seurat_object.TCR[,seurat_object.TCR$clonotype_frequency > 2], reduction
 
 ```{r}
 # Showing all Cells
-DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "RNA_clusters", split.by = "Infection", cells.highlight = which(seurat_object.TCR$duplicate == TRUE), pt.size = (seurat_object.TCR$clonotype_frequency)*0.6) + ggtitle("All cells - Proliferating Highlighted") + theme(plot.title = element_text(size = 7, face = "bold")) + NoLegend()
+DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "CD_annot", split.by = "Infection", cells.highlight = which(seurat_object.TCR$duplicate == TRUE), pt.size = (seurat_object.TCR$clonotype_frequency)*0.6) + ggtitle("All cells - Proliferating Highlighted") + theme(plot.title = element_text(size = 7, face = "bold")) + NoLegend()
 
-DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "RNA_clusters", split.by = "Infection", cells.highlight = which(seurat_object.TCR$paired_across_organ == TRUE), pt.size = (seurat_object.TCR$clonotype_frequency)*0.6) + ggtitle("All cells - Paired Highlighted") + theme(plot.title = element_text(size = 7, face = "bold")) + NoLegend()
+DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "CD_annot", split.by = "Infection", cells.highlight = which(seurat_object.TCR$paired_across_organ == TRUE), pt.size = (seurat_object.TCR$clonotype_frequency)*0.6) + ggtitle("All cells - Paired Highlighted") + theme(plot.title = element_text(size = 7, face = "bold")) + NoLegend()
 
-DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "RNA_clusters", split.by = "Infection", pt.size = (seurat_object.TCR$clonotype_frequency)*0.6, shape.by = "paired_across_organ") + ggtitle("All cells - Color by Cluster, Size by # of Cells with same Clonotype, Shape by if across Organ") + theme(plot.title = element_text(size = 7, face = "bold"))
+DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "CD_annot", split.by = "Infection", pt.size = (seurat_object.TCR$clonotype_frequency)*0.6, shape.by = "paired_across_organ") + ggtitle("All cells - Color by Cluster, Size by # of Cells with same Clonotype, Shape by if across Organ") + theme(plot.title = element_text(size = 7, face = "bold"))
 ```
 
 
-## 4.D Paired and Duplicate Frequency Distributions
+## 4.D Migratory and Duplicate Frequency Distributions
 
-### Paired Clonotypes Frequency Distribution
+### Migratory Clonotypes Frequency Distribution
 The below shows that a majority of the cells with TCR duplicates in multiple organs are in RNA Cluster 5. These are the clusters where we find a majority of the Th17 cell population.
 ```{r}
 DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "paired_across_organ") + ggtitle("TCR Paired by RNA UMAP")
 
-#TCR_paired_by_RNA <- as.data.frame(table(seurat_object.TCR$RNA_clusters[seurat_object.TCR$paired_across_organ == TRUE]))
-TCR_paired_by_RNA <- as.data.frame(table(seurat_object.TCR$RNA_clusters[seurat_object.TCR$paired_across_organ == TRUE],seurat_object.TCR$Mouse_New[seurat_object.TCR$paired_across_organ == TRUE]))
+#TCR_paired_by_RNA <- as.data.frame(table(seurat_object.TCR$CD_annot[seurat_object.TCR$paired_across_organ == TRUE]))
+TCR_paired_by_RNA <- as.data.frame(table(seurat_object.TCR$CD_annot[seurat_object.TCR$paired_across_organ == TRUE],seurat_object.TCR$Mouse_New[seurat_object.TCR$paired_across_organ == TRUE]))
 colnames(TCR_paired_by_RNA)[1] <- "RNA_Cluster"
 colnames(TCR_paired_by_RNA)[2] <- "Mouse"
 
@@ -333,7 +321,7 @@ ggplot(TCR_paired_by_RNA, aes(x = factor(RNA_Cluster), y = Freq, fill = Mouse)) 
   geom_bar(stat = "identity") +
   labs(x = "RNA Cluster", y = "Frequency") +
   ggtitle("Frequency of Cells with Paired Clonotypes across Organs in RNA Clusters") +
-  theme_minimal()
+  theme_minimal() + theme(axis.text.x = element_text(angle = 45))
 
 TCR_paired_by_Organ <- as.data.frame(table(seurat_object.TCR$Organ[seurat_object.TCR$paired_across_organ == TRUE], seurat_object.TCR$Mouse_New[seurat_object.TCR$paired_across_organ == TRUE]))
 colnames(TCR_paired_by_Organ)[1] <- "Organ"
@@ -351,8 +339,8 @@ ggplot(TCR_paired_by_Organ, aes(x = factor(Organ), y = Freq, fill = Mouse)) +
 ```{r}
 DimPlot(seurat_object.TCR, reduction = "umap_rna", group.by = "duplicate") + ggtitle("TCR Duplicate by RNA UMAP")
 
-#TCR_duplicate_by_RNA <- as.data.frame(table(seurat_object.TCR$RNA_clusters[seurat_object.TCR$duplicate == TRUE]))
-TCR_duplicate_by_RNA <- as.data.frame(table(seurat_object.TCR$RNA_clusters[seurat_object.TCR$duplicate == TRUE],seurat_object.TCR$Mouse_New[seurat_object.TCR$duplicate == TRUE]))
+#TCR_duplicate_by_RNA <- as.data.frame(table(seurat_object.TCR$CD_annot[seurat_object.TCR$duplicate == TRUE]))
+TCR_duplicate_by_RNA <- as.data.frame(table(seurat_object.TCR$CD_annot[seurat_object.TCR$duplicate == TRUE],seurat_object.TCR$Mouse_New[seurat_object.TCR$duplicate == TRUE]))
 colnames(TCR_duplicate_by_RNA)[1] <- "RNA_Cluster"
 colnames(TCR_duplicate_by_RNA)[2] <- "Mouse"
 
@@ -360,7 +348,7 @@ ggplot(TCR_duplicate_by_RNA, aes(x = factor(RNA_Cluster), y = Freq, fill = Mouse
   geom_bar(stat = "identity") +
   labs(x = "RNA Cluster", y = "Frequency") +
   ggtitle("Frequency of Cells with Duplicate Clonotypes across Organs in RNA Clusters") +
-  theme_minimal()
+  theme_minimal()+ theme(axis.text.x = element_text(angle = 45))
 
 TCR_duplicate_by_Organ <- as.data.frame(table(seurat_object.TCR$Organ[seurat_object.TCR$duplicate == TRUE], seurat_object.TCR$Mouse_New[seurat_object.TCR$duplicate == TRUE]))
 colnames(TCR_duplicate_by_Organ)[1] <- "Organ"
@@ -380,10 +368,10 @@ ggplot(TCR_duplicate_by_Organ, aes(x = factor(Organ), y = Freq, fill = Mouse)) +
 We want to see if the Total Number of TCRs is enriched in a cluster in Ca vs No
 Also if the number of proliferating TCRs is enriched in a cluster in Ca vs No
 
-```{r}
+```
 
 organs <- unique(seurat_object.TCR$Organ)
-clusters <- sort(unique(seurat_object.TCR$RNA_clusters))
+clusters <- sort(unique(seurat_object.TCR$CD_annot))
 
 total_tcr <- c()
 clono_tcr <- c()
@@ -401,7 +389,7 @@ for (organ in organs){
     #print(cluster)
     
     # Total cells with TCR
-    success_total <- as.data.frame(table(seurat_object.TCR$Infection[seurat_object.TCR$RNA_clusters == cluster & seurat_object.TCR$Organ == organ]))
+    success_total <- as.data.frame(table(seurat_object.TCR$Infection[seurat_object.TCR$CD_annot == cluster & seurat_object.TCR$Organ == organ]))
     Ca_total_success <- success_total$Freq[success_total$Var1 == "Ca"]
     No_total_success <- success_total$Freq[success_total$Var1 == "No"]
     
@@ -420,7 +408,7 @@ for (organ in organs){
     
     # Total TCR % (% of all cells)
     
-    denom_total <- as.data.frame(table(seurat_object$Infection[seurat_object$RNA_clusters == cluster & seurat_object$Organ == organ]))
+    denom_total <- as.data.frame(table(seurat_object$Infection[seurat_object$CD_annot == cluster & seurat_object$Organ == organ]))
     
     no_denom <- denom_total$Freq[1]
     ca_denom <- denom_total$Freq[2]
@@ -435,7 +423,7 @@ for (organ in organs){
     colnames(perc_total) <- c("Organ", "Cluster", "Ca_total_num", "No_total_num", "Ca_total", "No_total", "CA_Proportion", "NT_Proportion", "p-val")
     
     # Unique Clonotypes
-    success_clono <- as.data.frame(table(seurat_object.TCR$clonotype[seurat_object.TCR$RNA_clusters == cluster & seurat_object.TCR$Organ == organ], seurat_object.TCR$Infection[seurat_object.TCR$RNA_clusters == cluster & seurat_object.TCR$Organ == organ]))
+    success_clono <- as.data.frame(table(seurat_object.TCR$clonotype[seurat_object.TCR$CD_annot == cluster & seurat_object.TCR$Organ == organ], seurat_object.TCR$Infection[seurat_object.TCR$CD_annot == cluster & seurat_object.TCR$Organ == organ]))
     Ca_clono_success <- sum(success_clono$Freq[success_clono$Var2 == "Ca"] > 0)
     No_clono_success <- sum(success_clono$Freq[success_clono$Var2 == "No"] > 0)
     
@@ -467,7 +455,7 @@ for (organ in organs){
     colnames(perc_clono) <- c("Organ", "Cluster", "Ca_clono_num", "No_clono_num", "Ca_total", "No_total", "CA_Proportion", "NT_Proportion", "p-val")
     
     # Proliferating TCR
-    success_prolif <- as.data.frame(table(seurat_object.TCR$Infection[seurat_object.TCR$RNA_clusters == cluster & seurat_object.TCR$Organ == organ & seurat_object.TCR$duplicate == TRUE]))
+    success_prolif <- as.data.frame(table(seurat_object.TCR$Infection[seurat_object.TCR$CD_annot == cluster & seurat_object.TCR$Organ == organ & seurat_object.TCR$duplicate == TRUE]))
     Ca_prolif_success <- success_prolif$Freq[success_prolif$Var1 == "Ca"]
     No_prolif_success <- success_prolif$Freq[success_prolif$Var1 == "No"]
     
@@ -495,7 +483,7 @@ for (organ in organs){
     colnames(perc_prolif) <- c("Organ", "Cluster", "Ca_prolif_num", "No_prolif_num", "Ca_total", "No_total", "CA_Proportion", "NT_Proportion", "p-val")
     
     # Migratory TCR
-    success_migratory <- as.data.frame(table(seurat_object.TCR$Infection[seurat_object.TCR$RNA_clusters == cluster & seurat_object.TCR$Organ == organ & seurat_object.TCR$paired_across_organ == TRUE]))
+    success_migratory <- as.data.frame(table(seurat_object.TCR$Infection[seurat_object.TCR$CD_annot == cluster & seurat_object.TCR$Organ == organ & seurat_object.TCR$paired_across_organ == TRUE]))
     Ca_migratory_success <- success_migratory$Freq[success_migratory$Var1 == "Ca"]
     No_migratory_success <- success_migratory$Freq[success_migratory$Var1 == "No"]
     
@@ -561,7 +549,7 @@ perc_migratory$signif <- perc_migratory$corrected_p_values < 0.05
 
 Plotting clono_tcr
 
-```{r}
+```
 #library(reshape2)
 #df.long <- melt(df, id.vars=c("Organ", "Cluster"))
 library(tidyr)
@@ -604,7 +592,7 @@ ggplot(clono.long, aes(x = Organ, y = Proportion_Value, fill = Proportion_Type))
 
 vdj_dirs <- ("/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/TCR_data/")
 
-seurat_object_temp <- seurat_object_prefiltered
+seurat_object_temp <- seurat_object
 temp <- as.vector(paste(colnames(seurat_object_temp), "-1", sep=""))
 new_names <- substr(temp, start = 7, stop = nchar(temp))
 
@@ -634,7 +622,7 @@ https://en.wikipedia.org/wiki/Complementarity-determining_region
 table(so_vdj@meta.data[["n_chains"]], useNA = "ifany")
 
 # Create a new metadata column with "RNA_" prefix added to existing values
-existing_metadata <- so_vdj$RNA_clusters
+existing_metadata <- so_vdj$CD_annot
 so_vdj$RNA_new <- paste("RNA_", existing_metadata, sep = "")
 
 #so <- so[,!is.na(so$cdr3)]
@@ -779,14 +767,14 @@ so_vdj |>
 
 # Frequency Table by Sample
 get_frequency_table_Cluster <- function(clonotype) {
-  table(so_vdj$RNA_clusters[so_vdj$clonotype_id == clonotype])
+  table(so_vdj$CD_annot[so_vdj$clonotype_id == clonotype])
 }
 
 frequency_df_by_Cluster <- as.data.frame(sapply(colnames(temp_df), get_frequency_table_Cluster))
 
 normalize_df_by_Cluster <- as.data.frame(sapply(colnames(temp_df), get_frequency_table_Cluster))
-for (i in sort(unique(so_vdj$RNA_clusters))){
-  normalize_df_by_Cluster[i,] <- normalize_df_by_Cluster[i,] / (length(so_vdj$cell_barcode[so_vdj$RNA_clusters == i]))
+for (i in sort(unique(so_vdj$CD_annot))){
+  normalize_df_by_Cluster[i,] <- normalize_df_by_Cluster[i,] / (length(so_vdj$cell_barcode[so_vdj$CD_annot == i]))
 }
 ```
 
@@ -803,7 +791,7 @@ ggplot(data_melted_clust, aes(x = reorder(Row, -Frequency, sum), y = Frequency, 
        x = "Clonotype",
        y = "Frequency",
        fill = "All Cells Cluster") +
-  theme_minimal() +
+  theme_minimal() +  #facet_grid(. ~ )
   theme(legend.position = "top", axis.text.x = element_text(angle = 45, hjust = 1)) + coord_flip()
 
 ggplot(data_melted_clust, aes(x = reorder(Row, -Frequency, sum), y = Frequency, fill = Cluster)) +
@@ -816,19 +804,189 @@ ggplot(data_melted_clust, aes(x = reorder(Row, -Frequency, sum), y = Frequency, 
   theme(legend.position = "top", axis.text.x = element_text(angle = 45, hjust = 1)) + coord_flip()
 ```
 
+
+# Top 20 for Each Mouse by Cluster
+# Fig 14
+
+```{r}
+get_frequency_table_mouse_Cluster <- function(mouse, clonotype) {
+  so_temp <- so_vdj[,so_vdj$Mouse_New == mouse]
+  table(so_temp$CD_annot[so_temp$clonotype_id == clonotype])
+}
+
+freq_df_list <- list()
+
+for (mouse in unique(so_vdj$Mouse_New)){
+  #temp_df <- t(as.data.frame(rev(sort(table(so_vdj$clonotype_id[so_vdj$Mouse_New == mouse])))[1:20]))
+  temp_df <- t(as.data.frame(rev(sort(table(so_vdj$clonotype_id[so_vdj$Mouse_New == mouse])))[1:50])) # 50 contains all proliferating for every mouse
+  colnames(temp_df) <- temp_df["Var1",]
+  temp_df <- temp_df[,as.numeric(temp_df["Freq",]) > 1]
+  
+  freq_df_temp <- as.data.frame(sapply(colnames(temp_df), function(col) get_frequency_table_mouse_Cluster(mouse, col)))
+  
+  freq_df_temp <- freq_df_temp[rowSums(freq_df_temp != 0) > 0, ]
+  
+  freq_df_melted <- as.data.frame(t(freq_df_temp)) %>%
+  rownames_to_column(var = "Row") %>%
+  pivot_longer(cols = -Row, names_to = "Cluster", values_to = "Num_Cells")
+  
+  freq_df_melted$Frequency <- (freq_df_melted$Num_Cells / length(so_vdj$clonotype_id[so_vdj$Mouse_New == mouse]))
+  freq_df_melted$Percent <- freq_df_melted$Frequency * 100
+  
+  freq_df_melted$Mouse_New <- mouse
+  
+  freq_df_list[[mouse]] <- freq_df_melted
+}
+
+all_data <- rbind(freq_df_list$`No Infection Male`, freq_df_list$`Infected Female`, freq_df_list$`Infected Male` )
+
+all_clonos_2_up <- ggplot(all_data, aes(x = reorder(Row, -Frequency, sum), y = Percent, fill = Cluster)) +
+    geom_bar(stat = "identity") +
+    labs(title = "Frequency of Proliferating Clonotypes per Mouse",
+         x = "Clonotype",
+         y = "Percent of Mouse' Cells",
+         fill = "Cluster") +
+    theme_minimal() +  facet_wrap(vars(Mouse_New), scales = "free_y") +
+    theme(legend.position = "bottom", axis.text.x = element_text(angle = 45, hjust = 1), strip.text = element_text(face = "bold", size = 12)) + coord_flip()
+
+
+all_clonos_2_up
+
+```
+
+
+Cluster Freq by Mouse
+```{r}
+weighted_sum_row <- function(row) {
+  sum(as.numeric(names(row)) * row)
+}
+
+
+no_male <- table(all_data$Cluster[all_data$Mouse_New == "No Infection Male"], all_data$Num_Cells[all_data$Mouse_New == "No Infection Male"])
+colnames(no_male) <- as.numeric(colnames(no_male))
+weighted_sums_no_male <- apply(no_male, 1, weighted_sum_row)
+
+ca_male <- table(all_data$Cluster[all_data$Mouse_New == "Infected Male"], all_data$Num_Cells[all_data$Mouse_New == "Infected Male"])
+colnames(ca_male) <- as.numeric(colnames(ca_male))
+weighted_sums_ca_male <- apply(ca_male, 1, weighted_sum_row)
+
+ca_female <- table(all_data$Cluster[all_data$Mouse_New == "Infected Female"], all_data$Num_Cells[all_data$Mouse_New == "Infected Female"])
+colnames(ca_female) <- as.numeric(colnames(ca_female))
+weighted_sums_ca_female <- apply(ca_female, 1, weighted_sum_row)
+
+df <- as.data.frame(cbind(weighted_sums_ca_female, weighted_sums_ca_male, weighted_sums_no_male))
+df$Cluster <- rownames(df)
+```
+
+
+```{r}
+# Calculate the total number of TCRs for each mouse
+total_TCRs_ca_female <- sum(df$weighted_sums_ca_female)
+total_TCRs_ca_male <- sum(df$weighted_sums_ca_male)
+total_TCRs_no_male <- sum(df$weighted_sums_no_male)
+
+# Calculate the column sums for each mouse
+df$Ca_female_tcr_clust_perc <- (df$weighted_sums_ca_female) / total_TCRs_ca_female
+df$Ca_male_tcr_clust_perc <- (df$weighted_sums_ca_male) / total_TCRs_ca_male
+df$No_male_tcr_clust_perc <- (df$weighted_sums_no_male) / total_TCRs_no_male
+```
+
+```{r}
+df_perc <- df[,4:7]
+df_melt_perc <- melt(df_perc)
+# Create the bar plot using ggplot2
+df_melt_perc$Cluster <- factor(df_melt_perc$Cluster, levels = unique(df_melt_perc$Cluster))
+
+df_melt_perc <- df_melt_perc %>%
+  mutate(Mouse_Type = if_else(variable == "Ca_male_tcr_clust_perc", "Infected Male",
+                              if_else(variable == "No_male_tcr_clust_perc", "No Infection Male",
+                                      if_else(variable == "Ca_female_tcr_clust_perc", "Infected Female", variable, variable),
+                                      variable),
+                              variable))
+df_melt_perc$percentage <- df_melt_perc$value*100
+# Create the bar plot with facets
+prolif_clust <- ggplot(df_melt_perc, aes(x = Cluster, y = percentage, fill = Mouse_Type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Percentage of Mouse's Proliferating Cells in Each Cell Type",
+       x = "Cell Type",
+       y = "Percentage",
+       fill = "Mouse") +
+  scale_fill_manual(values = c("darkred", "navyblue", "forestgreen")) +
+  facet_wrap(~Cluster, scales = "free_x", nrow = 1)  # Facet by cell type
+```
+
+
+```{r}
+prolif <- cowplot::plot_grid(all_clonos_2_up, prolif_perc, ncol = 2, labels = c("A", "B"), rel_widths = c(1, 0.4))
+fig_14 <- cowplot::plot_grid(prolif, prolif_clust, ncol = 1, labels = c("", "C"))
+
+```
+
+```{r}
+fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
+
+ggsave(filename = paste0(fig_directory, "figure_14.pdf"), plot = fig_14, device = "pdf", height = 16, width = 24)
+
+ggsave(filename = paste0(fig_directory, "figure_14.jpeg"), plot = fig_14, device = "jpeg", height = 16, width = 24)
+```
+
+
+# Number of Proliferative Clonotypes Statistic
+
+```{r}
+#Infected
+prolif_inf <- (sum(table(so_vdj$clonotype_id[so_vdj$Mouse_New == "Infected Male"]) > 1) + sum(table(so_vdj$clonotype_id[so_vdj$Mouse_New == "Infected Female"]) > 1))
+num_clono_inf <- length(unique(so_vdj$clonotype_id[so_vdj$Mouse_New == "Infected Male"])) + length(unique(so_vdj$clonotype_id[so_vdj$Mouse_New == "Infected Female"]))
+
+# Non-infected
+prolif_no <- sum(table(so_vdj$clonotype_id[so_vdj$Mouse_New == "No Infection Male"]) > 1)
+num_clono_no <- length(unique(so_vdj$clonotype_id[so_vdj$Mouse_New == "No Infection Male"]))
+
+result <- prop.test(c(prolif_inf, prolif_no), c(num_clono_inf, num_clono_no))
+
+# Print the result
+print(result)
+
+# Percent of clonotypes that are proliferative in Infection
+(prolif_inf / num_clono_inf)*100
+
+# Percent of clonotypes that are proliferative in Non-infection
+(prolif_no / num_clono_no)*100
+```
+
+# Number of SMALL Proliferative Clonotypes Statistic
+
+```{r}
+#Infected
+small_prolif_inf <- (sum(table(so_vdj$clonotype_id[so_vdj$Mouse_New == "Infected Male"]) == 2) + sum(table(so_vdj$clonotype_id[so_vdj$Mouse_New == "Infected Female"]) == 2))
+
+# Non-infected
+small_prolif_no <- sum(table(so_vdj$clonotype_id[so_vdj$Mouse_New == "No Infection Male"]) == 2)
+
+result_small <- prop.test(c(small_prolif_inf, small_prolif_no), c(num_clono_inf, num_clono_no))
+result_small
+
+# Percent of clonotypes that are small proliferative in Infection
+(small_prolif_inf / num_clono_inf)*100
+
+# Percent of clonotypes that are proliferative in Non-infection
+(small_prolif_no/ num_clono_no)*100
+```
+
+
 ## 5.B-2 DJVDJ Clonotype Freq by Cluster
 
 ```{r}
 so_vdj <- so_vdj |>
   calc_frequency(
     data_col = "cdr3",
-    cluster_col = "RNA_clusters"
+    cluster_col = "CD_annot"
   )
 
 so_vdj |>
   plot_clone_frequency(
     data_col = "cdr3",
-    cluster_col = "RNA_clusters"
+    cluster_col = "CD_annot"
   )+ theme(axis.text.x=element_blank())
 ```
 
@@ -846,14 +1004,14 @@ gini <- function(x) {
 ```
 
 ```{r}
-clusters <- sort(unique(so_vdj$RNA_clusters))
+clusters <- sort(unique(so_vdj$CD_annot))
 cluster_D50 <- list()
 cluster_simpson_div_index <- list()
 cluster_gini_index <- list()
 
 for (cluster in clusters) {
   #print(cluster)
-  clonotype_ids <- so_vdj[, so_vdj$RNA_clusters == cluster]@meta.data[["clonotype_id"]]
+  clonotype_ids <- so_vdj[, so_vdj$CD_annot == cluster]@meta.data[["clonotype_id"]]
   clonotype_ids <- clonotype_ids[!is.na(clonotype_ids)]
   # Check if clonotype_ids has zero rows and skip the cluster if true
   if (length(clonotype_ids) > 0) {
@@ -884,7 +1042,7 @@ for (cluster in clusters) {
 ```{r}
 cluster_D50_df <- as.data.frame(t(as.data.frame(cluster_D50)))
 colnames(cluster_D50_df) <- c("D50_Score")
-rownames(cluster_D50_df) <- paste0("cluster_", seq(0,16))
+#rownames(cluster_D50_df) <- paste0("cluster_", seq(0,16))
 cluster_D50_df$Cluster <- rownames(cluster_D50_df)
 
 
@@ -903,7 +1061,7 @@ ggplot(cluster_D50_df, aes(x = Cluster, y = D50_Score, color = Cluster)) +
 ```{r}
 cluster_simp_df <- as.data.frame(t(as.data.frame(cluster_simpson_div_index)))
 colnames(cluster_simp_df) <- c("simp_Score")
-rownames(cluster_simp_df) <- paste0("cluster_", seq(0,16))
+#rownames(cluster_simp_df) <- paste0("cluster_", seq(0,16))
 cluster_simp_df$Cluster <- rownames(cluster_simp_df)
 
 
@@ -923,8 +1081,8 @@ ggplot(cluster_simp_df[cluster_simp_df$Cluster != "cluster_16",], aes(x = Cluste
 ```{r}
 cluster_gini_df <- as.data.frame(t(as.data.frame(cluster_gini_index)))
 colnames(cluster_gini_df) <- c("gini_Score")
-rownames(cluster_gini_df) <- paste0("cluster_", seq(0,16))
-cluster_gini_df$Cluster <- rownames(cluster_gini_df)
+#rownames(cluster_gini_df) <- paste0("cluster_", rownames(cluster_gini_df))
+cluster_gini_df$Cluster <-  paste0("cluster_", rownames(cluster_gini_df))
 
 
 ggplot(cluster_gini_df, aes(x = Cluster, y = gini_Score, color = Cluster)) +
@@ -944,7 +1102,7 @@ ggplot(cluster_gini_df, aes(x = Cluster, y = gini_Score, color = Cluster)) +
 clono_ids <- function(x, y){
     tryCatch(
         {
-        clono_ids <- temp_seurat$clonotype_id[temp_seurat$Mouse_New == x & temp_seurat$RNA_clusters == y]
+        clono_ids <- temp_seurat$clonotype_id[temp_seurat$Mouse_New == x & temp_seurat$CD_annot == y]
         return(clono_ids)
         },
         error=function(e) {
@@ -962,11 +1120,12 @@ clono_ids <- function(x, y){
 ```
 
 ```{r}
-temp_seurat <- so_vdj[which(so_vdj$clonotype_id != "NA"),]
+temp_seurat <- so_vdj[,which(so_vdj$clonotype_id != "NA")]
 mice <- c(sort(unique(temp_seurat$Mouse_New)))
 
 Idents(object = temp_seurat) <- "t_cell_clust"
-RNA_clusts <- sort(unique(temp_seurat$RNA_clusters))
+#RNA_clusts <- sort(unique(temp_seurat$CD4_clust_new11))
+RNA_clusts <- sort(unique(temp_seurat$CD_annot))
 
 sample_gini_clust <- as.data.frame(matrix(ncol = length(mice), nrow = length(RNA_clusts)))
 rownames(sample_gini_clust) <- paste0("cluster_",RNA_clusts)
@@ -1046,8 +1205,9 @@ df_long_gs$inf_clust <- paste0(df_long_gs$Infection, ".", df_long_simp$Cluster)
 ```{r}
 # Choose which one you want
 #df_long <- df_long_simp[df_long_simp$Cluster != "cluster_16",]
-
-df_long <- df_long_gs[df_long_gs$Cluster != "cluster_16",]
+#df_long <- df_long_gini[df_long_gs$Cluster != "cluster_16",]
+#df_long <- df_long_gs[df_long_gs$Cluster != "cluster_16",]
+df_long <- df_long_gini
 
 ggplot(df_long, aes(x = Cluster, y = Value, color = sample, shape = Infection)) +
   geom_point() +
@@ -1160,7 +1320,7 @@ so_vdj[which(so_vdj$chains == "TRB"),] |>
     method      = abdiv::shannon
   )
 
-so_vdj[which(so_vdj$RNA_clusters == 5),] |>
+so_vdj[which(so_vdj$CD_annot == 5),] |>
   plot_diversity(
     data_col    = "clonotype_id",
     cluster_col = "temp",
@@ -1284,8 +1444,6 @@ so_cdr3_clust <- so_vdj |>
 ```
 
 ```{r}
-clrs <- setNames(brewer.pal(11, "Paired"), 1:11)
-
 so_cdr3_clust |>
   plot_scatter(
     x = "cdr3_UMAP_1",
@@ -1297,13 +1455,14 @@ so_cdr3_clust |>
 so_cdr3_clust |>
   plot_frequency(
     data_col    = "cdr3_cluster_0.5",
-    cluster_col = "sample_name"
+    cluster_col = "Mouse_New"
   )
+
 ```
 
 ```{r}
-saveRDS(so_vdj, file = "so_vdj.rds")
-saveRDS(seurat_object.TCR, file = "seurat_object.TCR.rds")
+saveRDS(so_vdj, file = paste0(data_dir,"so_vdj.rds"))
+#saveRDS(seurat_object.TCR, file = "seurat_object.TCR.rds")
 ```
 
 ## 5.G Conversion to Anndata
@@ -1313,7 +1472,7 @@ library(Seurat)
 library(SeuratDisk)
 library(SeuratData)
 
-SaveH5Seurat(so_vdj, filename = "so_vdj.h5Seurat")
+SaveH5Seurat(so_vdj, filename = paste0(data_dir,"so_vdj.h5Seurat"))
 Convert("so_vdj.h5Seurat", dest = "h5ad")
 
 SaveH5Seurat(seurat_object_pseudo, filename = "seurat.h5Seurat")
@@ -1369,7 +1528,7 @@ percentage_data <- df %>%
 # Create a ggplot barplot
 ggplot(percentage_data, aes(x = RNA_new, y = percentage, fill = CDR3_Clust)) +
   geom_bar(stat = "identity", position = "stack") +
-  labs(x = "RNA_clusters", y = "Percentage") +
+  labs(x = "CD_annot", y = "Percentage") +
   scale_fill_discrete(name = "CDR3_Clust") +
   theme_minimal()
 ```
@@ -1458,7 +1617,7 @@ Idents(so_vdj) <- "Mouse_New"
 immdata$mouse_new <- Idents(so_vdj)
 immdata_mouse_new <- select_clusters(immdata, immdata$mouse_new, "mouse_new")
 
-Idents(so_vdj) <- "RNA_clusters"
+Idents(so_vdj) <- "CD_annot"
 immdata$clust <- Idents(so_vdj)
 immdata_mouse_new_clust <- select_clusters(immdata_mouse_new, immdata$clust, "clust")
 
@@ -1479,6 +1638,26 @@ ggplot(gini, aes(x = clust, y = V1, color = clust)) +
   ) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) + facet_grid(. ~ mouse) 
 
+
+ggplot(gini, aes(x = mouse, y = V1, color = mouse)) +
+  geom_boxplot() +
+  labs(
+    x = "Condition",
+    y = "Gini Index Value",
+    title = "Boxplot of Frequency by Cluster and Condition") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + facet_grid(. ~ clust) 
+
+
+gini_new <- gini[gini$clust %in% c("Effector CD4- Lung", "Th17 CD4", "Treg/Th2 CD4- Colon/Lung", "Tfh CD4- mLns", "KLRG1+ Eff CD8- Lung","Effector CD4- Lung/Colon", "TCRGD+ CD8- Lung", "Ly6c2+ CD8- Lung/Colon", "Naive CD4- Lung"),]
+# Removing clusters with 0 gini index
+ggplot(gini_new, aes(x = mouse, y = V1, color = mouse)) +
+  geom_boxplot() +
+  labs(
+    x = "Condition",
+    y = "Gini Index Value",
+    title = "Boxplot of Frequency by Cluster and Condition") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + facet_grid(. ~ clust) 
+
 ```
 
 Pretty similar to our gini indexes, not sure what is different between them. Need to check the 
@@ -1491,7 +1670,7 @@ Idents(so_vdj) <- "sample_name"
 immdata$sample <- Idents(so_vdj)
 immdata_sample <- select_clusters(immdata, immdata$sample, "sample")
 
-Idents(so_vdj) <- "RNA_clusters"
+Idents(so_vdj) <- "CD_annot"
 immdata$clust <- Idents(so_vdj)
 immdata_clust <- select_clusters(immdata, immdata$clust, "RNA_clust")
 
@@ -1586,6 +1765,8 @@ jaccard_similarity <- function(list1, list2) {
 }
 ```
 
+
+# STOPPED RNA CLUST HERE
 ```{r}
 # All CDR3
 #so_vdj$cdr3[which(so_vdj$chains == "TRA;TRB" & so_vdj$sample_name == "Ca_colon_F")]
@@ -1594,7 +1775,7 @@ tcrb_list_clust5 <- list()
 
 for (sample in unique(so_vdj$sample_name)){
   tcrb_list[[sample]] <- as.list(gsub(".*?;", "", so_vdj$cdr3[which(so_vdj$chains == "TRA;TRB" & so_vdj$sample_name == sample)]))
-  tcrb_list_clust5[[sample]] <- as.list(gsub(".*?;", "", so_vdj$cdr3[which(so_vdj$chains == "TRA;TRB" & so_vdj$sample_name == sample & so_vdj$RNA_clusters == 5)]))
+  tcrb_list_clust5[[sample]] <- as.list(gsub(".*?;", "", so_vdj$cdr3[which(so_vdj$chains == "TRA;TRB" & so_vdj$sample_name == sample & so_vdj$CD_annot == 5)]))
 }
 
 # Extract names and lists

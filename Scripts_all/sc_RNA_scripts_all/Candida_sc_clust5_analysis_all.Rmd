@@ -1,0 +1,714 @@
+---
+title: "Candida_sc_clust5"
+author: "Nathan Morris"
+date: "2023-11-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = getwd())
+```
+
+
+# Cluster 5 Analysis
+
+### Data Import
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+# Data Import
+library(Seurat)
+library(scater)
+library(dplyr)
+library(SingleR)
+library(celldex)
+library(scRNAseq)
+library(scran)
+library(gridExtra)
+library(pheatmap)
+library(ess)
+library(scCustomize)
+library(reticulate)
+library(ReductionWrappers)
+
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data"
+setwd(data_dir)
+```
+
+```{r}
+seurat_object <- readRDS(paste0(data_dir,"/dataset_post_sc_Analysis.Rds"))
+```
+
+## For Reticulate (Python-R wrapper)
+For reticulate - python virtual environment activation
+This makes a conda enviornment r-reticulate, and then downloades the opentsne and phate packages from python (https://github.com/pavlin-policar/openTSNE/ and https://github.com/KrishnaswamyLab/PHATE).
+Therefore, we can use these packages, when we call the r-reticulate package and the ReductionWrappers, which are R language wrappers for these packages.
+```{r}
+conda_list()
+use_condaenv("r-reticulate")    #activate an environment e.g py2_env
+py_install("opentsne")
+reticulate::py_install("phate", pip=TRUE)
+devtools::install_github("KrishnaswamyLab/phateR")
+py_install("fa2")
+
+#reticulate::py_discover_config("phate")
+
+```
+
+# Cluster 5 - Identifying Cells when Subsetting
+
+```{r}
+Idents(seurat_object) <- "RNA_clusters"
+Cluster_Highlight_Plot(seurat_object = seurat_object, cluster_name = c("5"), highlight_color = c("navy"), background_color = "lightgray")
+```
+
+# Finding Marker Genes for All Clust 5
+
+```{r}
+# Find all markers of cluster 5 against all
+Idents(seurat_object) <- "RNA_clusters"
+cluster5.markers <- FindMarkers(seurat_object, ident.1 = 5, only.pos = TRUE, min.pct = 0.05, logfc.threshold = 0.05)
+#head(cluster5.markers, n = 5)
+```
+
+```{r}
+#markers <- seurat_object.RNAmarkers[seurat_object.RNAmarkers$cluster == 5,]
+DefaultAssay(object = seurat_object) <- "RNA"
+markers <- cluster5.markers[order(cluster5.markers$p_val_adj), ]
+markers <- markers[(markers$p_val_adj > 0),]
+
+marker_genes <- rownames(markers[1:8,])
+marker_genes <- marker_genes[!is.na(marker_genes)]
+
+more_marker_genes <- rownames(markers[1:50,])
+more_marker_genes <- more_marker_genes[!is.na(more_marker_genes)]
+
+FeaturePlot(seurat_object, features = marker_genes, ncol = 4, reduction = "umap_rna")
+
+FeaturePlot(seurat_object, features = marker_genes[1:2], ncol = 2, reduction = "umap_rna", split.by = "Infection")
+  
+DoHeatmap(seurat_object, features = more_marker_genes, raster = FALSE) + NoLegend()
+  
+#ggsave(paste("Cluster-5", "_Top50_Markers_Heatmap.pdf", sep = ""), width=16, height=16)
+
+DotPlot(seurat_object, features = more_marker_genes) + RotatedAxis() + coord_flip()
+```
+
+
+# Cluster 5 Organ and Infection Distribution
+```{r}
+table(seurat_object$Organ[which(seurat_object$RNA_clusters == 5)])
+table(seurat_object$Infection[which(seurat_object$RNA_clusters == 5)])
+```
+
+Cluster 5 mainly consists of Colon and Lung samples. It also shows a significant difference between No and Candida infected samples.
+
+
+# Cluster 5 - Re-clustering
+
+```{r}
+seurat_clust5 <- subset(x = seurat_object, subset = (RNA_clusters == 5))
+
+seurat_clust5 <- seurat_clust5 %>% NormalizeData(verbose = FALSE) %>% FindVariableFeatures(selection.method = "vst", nfeatures = 4000) %>% ScaleData(verbose = TRUE)
+so.clust5 <- seurat_clust5 %>% RunPCA(pc.genes = seurat_clust5@var.genes, npcs = 30, verbose = FALSE) %>% 
+    RunUMAP(dims = 1:25) %>% RunTSNE(dims = 1:25) %>% FindNeighbors(dims = 1:25,compute.SNN=TRUE) %>% FindClusters(resolution = c(0.1,0.2,0.4,0.8,1)) %>% DoopenTSNE(reduction_save = "openTSNE",dims_use = 1:25) 
+
+```
+
+```{r}
+# Trying to run PHATE and ForceAtlas
+#b_seurat_phate <- DoPHATE(b_seurat, reduction_use = "pca", reduction_save = "phate", dims_use = 1:25) 
+so.clust5 <- DoForceAtlas2(so.clust5, reduction_use = "pca", reduction_save = "fa2", dims_use = 1:25)
+```
+
+## Visualizing Re-clustering
+
+```{r}
+# Infection Plots
+DimPlot(so.clust5, reduction = "umap", group.by = "Infection")
+DimPlot(so.clust5, reduction = "tsne", group.by = "Infection")
+DimPlot(so.clust5, reduction = "openTSNE", group.by = "Infection")
+DimPlot(so.clust5, reduction = "fa2", group.by = "Infection")
+
+# Resolution 0.4
+DimPlot(so.clust5, reduction = "umap", group.by = "RNA_snn_res.0.4", label = TRUE)
+DimPlot(so.clust5, reduction = "tsne", group.by = "RNA_snn_res.0.4", label = TRUE)
+DimPlot(so.clust5, reduction = "openTSNE", group.by = "RNA_snn_res.0.4", label = TRUE)
+DimPlot(so.clust5, reduction = "fa2", group.by = "RNA_snn_res.0.4", label = TRUE)
+DimPlot(so.clust5, reduction = "openTSNE", group.by = "RNA_snn_res.0.4", label = TRUE, split.by = "Infection")
+
+# Resolution 0.8
+DimPlot(so.clust5, reduction = "umap", group.by = "RNA_snn_res.0.8", label = TRUE)
+DimPlot(so.clust5, reduction = "tsne", group.by = "RNA_snn_res.0.8", label = TRUE)
+DimPlot(so.clust5, reduction = "openTSNE", group.by = "RNA_snn_res.0.8", label = TRUE)
+DimPlot(so.clust5, reduction = "fa2", group.by = "RNA_snn_res.0.8", label = TRUE)
+DimPlot(so.clust5, reduction = "openTSNE", group.by = "RNA_snn_res.0.8", label = TRUE, split.by = "Infection")
+
+# Resolution 1.0
+DimPlot(so.clust5, reduction = "umap", group.by = "RNA_snn_res.1", label = TRUE)
+DimPlot(so.clust5, reduction = "tsne", group.by = "RNA_snn_res.1", label = TRUE)
+DimPlot(so.clust5, reduction = "openTSNE", group.by = "RNA_snn_res.1", label = TRUE)
+DimPlot(so.clust5, reduction = "fa2", group.by = "RNA_snn_res.1", label = TRUE)
+DimPlot(so.clust5, reduction = "openTSNE", group.by = "RNA_snn_res.1", label = TRUE, split.by = "Infection")
+
+# Density Plots
+#Plot_Density_Custom(seurat_object = tnk_seurat_v2, features = "Fos")
+
+```
+
+```{r}
+so.clust5$subclust_5 <- so.clust5$RNA_snn_res.0.4
+so.clust5$subclust_5.08 <- so.clust5$RNA_snn_res.0.8
+so.clust5$subclust_5.1 <- so.clust5$RNA_snn_res.1
+```
+
+Add Metadata
+
+```{r}
+so.clust5[['Mouse_New']] <- so.clust5[['Mouse']]
+
+Idents(so.clust5) <- 'Mouse_New'
+
+so.clust5 <- RenameIdents(so.clust5, `mouse0082` = 'No Infection Male', `mouse0081` = 'Infected Female', `mouse0080` = 'Infected Male')
+
+so.clust5[['Mouse_New']] <- Idents(so.clust5)
+
+so.clust5$Mouse_New <- factor(so.clust5$Mouse_New, levels = c('No Infection Male', 'Infected Female', 'Infected Male'))
+
+```
+
+```{r}
+table(so.clust5$subclust_5, so.clust5$Mouse_New)
+table(so.clust5$subclust_5.08, so.clust5$Mouse_New)
+table(so.clust5$subclust_5.1, so.clust5$Mouse_New)
+```
+
+# Adding Alex's Reclustering 12/18
+
+```{r}
+alex_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Data Clubs:Meetings/09_01_Alex_Data/20230901_update/Cluster5_Subclustering/"
+
+poo <- readRDS(file = paste0(alex_dir, "Cluster5_processed_seurat.rds"))
+
+#poo1 <- readRDS(file = paste0(alex_dir, "Cluster5_pseudotime_seurat.rds"))
+
+so.clust5$alex_clusters <- poo[match(so.clust5@meta.data[["cell_barcode"]], poo@meta.data[["cell_barcode"]]),]$seurat_clusters
+
+#table(so.clust5$alex_clusters, so.clust5$Clust5_subclust)
+
+```
+
+# Seeing Alex's Clusters on the whole UMAP
+```{r}
+# Extract common barcodes
+common_barcodes <- intersect(rownames(seurat_object_high_clust), rownames(so.clust5))
+
+# Match and assign alex_clusters
+seurat_object_high_clust$alex_clust <- so.clust5[match(common_barcodes, so.clust5$cell_barcode), ]$alex_clusters
+
+Idents(object = seurat_object_high_clust) <- "alex_clust"
+DimPlot(seurat_object_high_clust, reduction = "umap_rna", label = TRUE, repel = TRUE)
+```
+
+## Mouse Proportion in each Cluster
+
+```{r}
+#data <- as.data.frame(table(so.clust5$subclust_5.08, so.clust5$Mouse_New))
+data <- as.data.frame(table(so.clust5$alex_clusters, so.clust5$Mouse_New))
+colnames(data) <- c("Cluster", "Mouse", "Freq")
+
+result <- data %>%
+  group_by(Mouse) %>%
+  mutate(Percentage = Freq / sum(Freq) * 100) %>%
+  ungroup()
+
+ggplot(result, aes(x = factor(Cluster), y = Percentage, fill = Mouse)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  labs(title = "Percentage Subcluster cells from each Mouse",
+       x = "Cluster 5 subcluster",
+       y = "Percentage of Subcluster cells from Each Mouse") +
+  geom_text(aes(label = paste0(round(Percentage), "%")),
+            position = position_dodge(width = 0.7),
+            vjust = -0.5, size = 3) +
+  theme_minimal()
+```
+
+
+## Organ Proportion in each Cluster
+
+```{r}
+#data <- as.data.frame(table(so.clust5$subclust_5.08, so.clust5$Organ))
+data <- as.data.frame(table(so.clust5$alex_clusters, so.clust5$Organ))
+colnames(data) <- c("Cluster", "Organ", "Freq")
+
+result <- data %>%
+  group_by(Organ) %>%
+  mutate(Percentage = Freq / sum(Freq) * 100) %>%
+  ungroup()
+
+ggplot(result, aes(x = factor(Cluster), y = Percentage, fill = Organ)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  labs(title = "Percentage of Each Organ in Each Cluster",
+       x = "Cluster 5 Subcluster",
+       y = "Percentage of Subcluster cells in each Organ") +
+  geom_text(aes(label = paste0(round(Percentage), "%")),
+            position = position_dodge(width = 0.7),
+            vjust = -0.5, size = 3)  +
+  theme_minimal()
+```
+
+
+## 
+```{r}
+DimPlot(so.clust5, reduction = "fa2", group.by = "alex_clusters", label = TRUE)
+DimPlot(so.clust5, reduction = "openTSNE", group.by = "alex_clusters", label = TRUE, split.by = "Infection")
+
+DimPlot(so.clust5, reduction = "openTSNE", group.by = "Organ", label = TRUE, split.by = "Infection")
+DimPlot(so.clust5, reduction = "openTSNE", group.by = "Mouse_New", label = TRUE, split.by = "Infection")
+```
+
+### Subclusters - All Marker Genes
+
+## 12/18
+
+```{r}
+Idents(object = so.clust5) <- "subclust_5.08"
+so.clust5_allmark_RNA <- FindAllMarkers(so.clust5, assay = "RNA", logfc.threshold = 0.025, min.pct = 0.025, only.pos = TRUE)
+
+so.clust5_allmark_RNA <- so.clust5_allmark_RNA[so.clust5_allmark_RNA$p_val_adj < 0.10,]
+
+so.clust5_allmark_ADT <- FindAllMarkers(so.clust5, assay = "ADT", logfc.threshold = 0.025, min.pct = 0.025, only.pos = TRUE)
+```
+
+```{r}
+fig_dir <- ("/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Data_share_12_11/")
+write.csv(so.clust5_allmark_RNA, paste0(fig_dir, "Cluster_5_Subcluster_DE_Genes_RNA.csv"), row.names=FALSE)
+write.csv(so.clust5_allmark_ADT, paste0(fig_dir, "Cluster_5_Subcluster_DE_Protein_ADT.csv"), row.names=FALSE)
+```
+
+```{r}
+top_10_df_clust5 <- Extract_Top_Markers(marker_dataframe = so.clust5_allmark_RNA, num_genes = 10, data_frame = TRUE,
+    rank_by = "avg_log2FC", named_vector = FALSE, make_unique = TRUE)
+head(top_10_df_clust5, 10)
+#any(duplicated(x = top_5_df$gene))
+
+```
+
+```{r}
+DefaultAssay(so.clust5) <- "RNA"
+Clustered_DotPlot(so.clust5, features = unique(top_10_df_clust5$gene))
+
+DoHeatmap(so.clust5, features = unique(top_10_df_clust5$gene), raster = FALSE)
+```
+
+# Using Alex Clusters
+
+```{r}
+Idents(object = so.clust5) <- "alex_clusters"
+so.clust5_allmark_RNA_alex <- FindAllMarkers(so.clust5, assay = "RNA", logfc.threshold = 0.025, min.pct = 0.025, only.pos = TRUE)
+
+so.clust5_allmark_RNA_alex <- so.clust5_allmark_RNA_alex[so.clust5_allmark_RNA_alex$p_val_adj < 0.10,]
+
+so.clust5_allmark_ADT_alex <- FindAllMarkers(so.clust5, assay = "ADT", logfc.threshold = 0.025, min.pct = 0.025, only.pos = TRUE)
+```
+
+```
+fig_dir <- ("/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Data_share_12_11/")
+write.csv(so.clust5_allmark_RNA_alex, paste0(fig_dir, "Cluster_5_alex-Subcluster_DE_Genes_RNA.csv"), row.names=FALSE)
+write.csv(so.clust5_allmark_ADT_alex, paste0(fig_dir, "Cluster_5_alex-Subcluster_DE_Protein_ADT.csv"), row.names=FALSE)
+```
+
+
+```{r}
+top_10_df_clust5_alex <- Extract_Top_Markers(marker_dataframe = so.clust5_allmark_RNA_alex, num_genes = 10, data_frame = TRUE,
+    rank_by = "avg_log2FC", named_vector = FALSE, make_unique = TRUE)
+head(top_10_df_clust5_alex, 10)
+#any(duplicated(x = top_5_df$gene))
+
+```
+
+```{r}
+DefaultAssay(so.clust5) <- "RNA"
+Clustered_DotPlot(so.clust5, features = unique(top_10_df_clust5_alex$gene))
+
+DoHeatmap(so.clust5, features = unique(top_10_df_clust5_alex$gene), raster = FALSE)
+```
+
+# Alex Cluster Marker Literature Search
+
+Cluster 0:
+
+Cluster 1:
+
+Cluster 2:
+Mostly Colon
+Somewhat higher concentration of the Infected Population
+GPR183 - https://bpspubs.onlinelibrary.wiley.com/doi/epdf/10.1111/bph.15311
+  - G-protein coupled receptor 2 - 
+  - Migration of GPR183 expressing cells to higher cholesterol oxidation derived Oxysterol concentrations
+
+```{r}
+AverageExpression(so.clust5, features = "Mki67", group.by = "alex_clusters", assay = "RNA")
+```
+
+```{r}
+
+```
+
+# Merging TCR
+
+
+```{r}
+#Merge TCR
+
+so.clust5$clonotype <- IGT27_TCR[match(so.clust5@meta.data[["cell_barcode"]], IGT27_TCR$Barcode),]$clonotype
+
+table(rev(sort(table(so.clust5$clonotype))))
+
+Idents(object = so.clust5) <- "clonotype"
+
+so.clust5$clonotype_frequency <- IGT27_TCR[match(so.clust5@meta.data[["cell_barcode"]], IGT27_TCR$Barcode),]$Clonotype_frequency
+
+table(rev(sort(table(so.clust5$clonotype))))
+
+so.clust5@meta.data[["paired_across_organ"]] <- so.clust5@meta.data[["cell_barcode"]] %in% IGT27_TCR$Barcode[IGT27_TCR$paired_across_organ == TRUE]
+
+Idents(object = so.clust5) <- "paired_across_organ"
+
+so.clust5@meta.data[["paired_across_organ"]]<- as.factor(so.clust5$paired_across_organ)
+
+so.clust5@meta.data[["duplicate"]] <- so.clust5@meta.data[["cell_barcode"]] %in% IGT27_TCR$Barcode[IGT27_TCR$duplicate == TRUE]
+
+Idents(object = so.clust5) <- "duplicate"
+
+so.clust5@meta.data[["duplicate"]]<- as.factor(so.clust5$duplicate)
+```
+
+```{r}
+DimPlot(so.clust5, reduction = "umap_rna", group.by = "paired_across_organ", label = TRUE, split.by = "subclust_5.08")
+
+DimPlot(so.clust5, reduction = "umap_rna", group.by = "clonotype_frequency", label = TRUE, split.by = "subclust_5.08")
+```
+
+```{r}
+data <- as.data.frame(table(so.clust5$subclust_5.08, so.clust5$paired_across_organ))
+colnames(data) <- c("Subcluster", "Migratory", "Freq")
+
+result <- data %>%
+  group_by(Subcluster) %>%
+  mutate(Percentage = Freq / sum(Freq) * 100) %>%
+  ungroup()
+
+ggplot(result, aes(x = factor(Subcluster), y = Percentage, fill = Migratory)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  labs(title = "Percentage of Migratory Cells in Each Subcluster",
+       x = "Cluster 5 Subcluster",
+       y = "Percentage of Subcluster") +
+    geom_text(aes(label = paste0(round(Percentage), "%")),
+            position = position_dodge(width = 0.7),
+            vjust = -0.5, size = 3)  +
+  theme_minimal()
+```
+
+
+```{r}
+data <- as.data.frame(table(so.clust5$subclust_5.08, so.clust5$clonotype_frequency))
+colnames(data) <- c("Subcluster", "Clone_Num", "Freq")
+
+result <- data %>%
+  group_by(Subcluster) %>%
+  mutate(Percentage = Freq / sum(Freq) * 100) %>%
+  ungroup()
+
+result$Clone_Num <- unfactor(result$Clone_Num)
+
+result$Clone_Num[result$Clone_Num == 1] <- "Unique Clonotype"
+
+result$Clone_Num <- factor(result$Clone_Num, levels = c("Unique Clonotype", 2, 3, 4, 5))
+
+ggplot(result, aes(x = factor(Subcluster), y = Percentage, fill = Clone_Num)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  labs(title = "Clone_Num/Clonal Expansion Distribution in Each Subcluster",
+       x = "Cluster 5 Subcluster",
+       y = "Percentage of Subcluster Cells with each Clone #",
+       fill = "Cells with the Same Clonotype") +
+      geom_text(aes(label = paste0(round(Percentage), "%")),
+            position = position_dodge(width = 0.7),
+            vjust = -0.5, size = 3)  +
+  theme_minimal()
+```
+
+
+```{r}
+saveRDS(so.clust5, file = paste0(data_dir, "only_subclust5_12_08.rds"))
+```
+
+
+
+# Adding Subcluster to Seurat object with all cells
+
+```{r}
+#setwd(data_dir)
+seurat_object_new_new <- readRDS(seurat_object_new_new, file = paste0(data_dir, "seurat_new_12_08.rds"))
+```
+
+```{r}
+temp_subclust <- c()
+temp_subclust$subclust <- so.clust5$subclust_5.08
+names(temp_subclust$subclust) <- names(so.clust5$subclust_5.08)
+temp_subclust$cell_barcode <- names(so.clust5$subclust_5.08)
+#temp_subclust <- as.data.frame(temp_subclust)
+
+seurat_object_new_new$subclust5 <- temp_subclust$subclust[match(so.clust5@meta.data[["cell_barcode"]], temp_subclust$cell_barcode)]
+```
+
+
+```{r}
+plot.list <- lapply(X = ob.list, FUN = function(x) {
+    DimPlot(x, reduction = "umap", label = FALSE, label.size = 4)
+})
+
+p1 <- DimPlot(seurat_object_new_new, reduction = "umap_rna", group.by = "subclust5", label = TRUE, split.by = "Mouse_New", ncol = 4)
+#seurat_object_new_new$Infection
+```
+
+```{r}
+seurat_object_new_new$subclust5[is.na(seurat_object_new_new$subclust5)] <- "Not in Cluster 5"
+seurat_object_new_new$subclust5 <- as.factor(seurat_object_new_new$subclust5)
+```
+
+```{r}
+saveRDS(seurat_object_new_new, file = paste0(data_dir, "so_allcells_subclust5_12_08.rds"))
+```
+
+
+
+###
+
+# ONLY CD4 Diffusion Map
+```{r}
+AverageExpression(seurat_object, assay = "ADT", features = "CD4", group.by = "RNA_clusters")
+
+DefaultAssay(seurat_object) <- "ADT"
+FeaturePlot(seurat_object, features = "CD4", reduction = "umap_rna")
+so_CD4 <- subset(x = seurat_object, subset = CD4 > 2.0)
+so_CD4$RNA_clust_annot <- factor(so_CD4$RNA_clust_annot)
+
+sce_CD4 <- as.SingleCellExperiment(so_CD4)
+```
+
+https://broadinstitute.github.io/2019_scWorkshop/functional-pseudotime-analysis.html#diffusion-map-pseudotime
+
+
+```{r}
+library(destiny)
+dm_CD4 <- DiffusionMap(sce_CD4, verbose = TRUE)
+```
+
+```{r}
+#cellLabels <- sce_CD4$RNA_clusters
+#cellLabels <- sce_CD4$RNA_clust_annot
+#cellLabels <- sce_CD4$Mouse
+cellLabels <- sce_CD4$Organ
+tmp <- data.frame(DC1 = eigenvectors(dm_CD4)[, 1],
+                  DC2 = eigenvectors(dm_CD4)[, 2],
+                  DC3 = eigenvectors(dm_CD4)[, 3],
+                  DC4 = eigenvectors(dm_CD4)[, 4],
+                  Samples = cellLabels)
+#pdf("./DC1_DC2.pdf", w=11, h=8.5)
+ggplot(tmp, aes(x = DC1, y = DC2, colour = Samples)) +
+  geom_point()  + 
+  xlab("Diffusion component 1") + 
+  ylab("Diffusion component 2") +
+  theme_classic()
+```
+
+```{r}
+sce_CD4$pseudotime_diffusionmap <- rank(eigenvectors(dm_CD4)[,1])    # rank cells by their dpt
+ggplot(as.data.frame(colData(sce_CD4)), 
+       aes(x = pseudotime_diffusionmap, 
+           y = RNA_clust_annot, colour = RNA_clust_annot)) +
+    geom_point() +
+    xlab("Diffusion component 1 (DC1)") + ylab("Timepoint") +
+    ggtitle("Cells ordered by DC1")
+```
+
+
+```{r}
+plotExpression(sce_CD4, "Il23r", x = "pseudotime_diffusionmap", 
+               colour_by = "RNA_clust_annot", show_violin = FALSE,
+               show_smooth = TRUE)
+```
+
+
+```{r}
+# Can select which tips you would like to acknowledge
+dpt <- DPT(dm_CD4)
+
+grid.arrange(plot(dpt))
+```
+
+
+
+# HOW TO MAKE A GENE SET FEATURE PLOT
+```{r}
+gene.set <- sample(x = rownames(x = seurat_object@assays[["RNA"]]), size = 100, replace = FALSE)
+
+Il17.gene.set <- c("Il17a", "Il23r", "Rorc")
+
+# Get mean expression of genes of interest per cell
+mean.exp <- colMeans(x = seurat_object@assays[["RNA"]][Il17.gene.set, ], na.rm = TRUE)
+
+# Add mean expression values in 'object@meta.data$gene.set.score'
+if (all(names(x = mean.exp) == rownames(x = seurat_object@meta.data))) {
+  cat("Cell names order match in 'mean.exp' and 'object@meta.data':\n", 
+      "adding gene set mean expression values in 'object@meta.data$gene.set.score'")
+  seurat_object@meta.data$Il17.gene.set.score <- mean.exp
+}
+
+# Plot mean expression using Seurat::FeaturePlot()
+FeaturePlot(object = seurat_object, features = "Il17.gene.set.score")
+```
+
+
+
+
+
+
+
+
+
+### OLD, NOT 12/11/2023
+### OK
+
+
+
+
+
+# Cluster 5 - Finding Markers between Candida and Non-Candida for each Organ
+
+```{r}
+organs <- c(unique(seurat_object$Organ))
+
+for (i in organs){
+  Idents(object = seurat_object) <- "RNA_clusters"
+  DefaultAssay(seurat_object) <- "RNA"
+  seurat_object.sub <- subset(x = seurat_object, subset = (RNA_clusters == 5))
+  seurat_object.organ <- subset(x = seurat_object.sub, subset = (Organ == i))
+  
+  Idents(object = seurat_object.organ) <- "Infection"
+  
+  DefaultAssay(seurat_object.organ) <- "RNA"
+  Candida_cluster5.markers_per_organ <- FindMarkers(seurat_object.organ, ident.1 = "Ca", only.pos = TRUE, test.use = "DESeq2", logfc.threshold = 0.05, min.pct = 0.05)
+  
+  write.csv(Candida_cluster4.markers_per_organ, paste(i, "_CA_RNA_Markers.csv", sep = ""))
+}
+```
+
+
+
+# Increasing RNA clustering resolution to split Cluster 5
+Here, I'm trying to re-run the analysis from the Commands section of the seurat object in order to change the resolution and check cluster stability:
+```{r}
+set.seed(42)
+DefaultAssay(seurat_object.lung) <- "RNA"
+DefaultAssay(seurat_object.colon) <- "RNA"
+# seurat_object.lung, seurat_object.mlns, seurat_object.colon
+
+seurat_object.lung <- NormalizeData(object = seurat_object.lung)
+seurat_object.lung <- FindVariableFeatures(object = seurat_object.lung)
+seurat_object.lung <- ScaleData(object = seurat_object.lung)
+seurat_object.lung <- RunPCA(object = seurat_object.lung)
+seurat_object.lung <- FindNeighbors(object = seurat_object.lung)
+seurat_object.lung <- FindClusters(object = seurat_object.lung, resolution = c(2.5))
+
+seurat_object.colon <- NormalizeData(object = seurat_object.colon)
+seurat_object.colon <- FindVariableFeatures(object = seurat_object.colon)
+seurat_object.colon <- ScaleData(object = seurat_object.colon)
+seurat_object.colon <- RunPCA(object = seurat_object.colon)
+seurat_object.colon <- FindNeighbors(object = seurat_object.colon)
+seurat_object.colon <- FindClusters(object = seurat_object.colon, resolution = c(2.5))
+```
+
+# Cluster Similarity between RNA Clusters and Cluster 5 Split Clusters
+
+Lung
+```{r}
+cluster_matrix <- as.matrix(table(seurat_object.lung$RNA_clusters, seurat_object.lung$RNA_snn_res.2.5))
+
+rownames(cluster_matrix) <- paste("RNA", rownames(cluster_matrix))
+colnames(cluster_matrix) <- paste("Split", colnames(cluster_matrix))
+
+# Create heatmap
+pheatmap(cluster_matrix, 
+        #col = colorRampPalette(c("yellow", "blue"))(20),
+        main = "Lung Cluster Similarity Heatmap between RNA and RNA 2.5 Resolution")
+        #labels_row = make_bold_names(cluster_matrix, rownames, c("WNN 4")),
+        #labels_col = make_bold_names(cluster_matrix, colnames, c("RNA 5")))
+        #xlab = "RNA Clusters",
+        #ylab = "WNN Clusters")
+```
+
+Based on this graph, RNA 5 is split into clusters 13, 16 and 17 for lung.
+
+Colon
+```{r}
+cluster_matrix <- as.matrix(table(seurat_object.colon$RNA_clusters, seurat_object.colon$RNA_snn_res.2.5))
+
+rownames(cluster_matrix) <- paste("RNA", rownames(cluster_matrix))
+colnames(cluster_matrix) <- paste("Split", colnames(cluster_matrix))
+
+# Create heatmap
+pheatmap(cluster_matrix, 
+        #col = colorRampPalette(c("yellow", "blue"))(20),
+        main = "Colon Cluster Similarity Heatmap between RNA and RNA 2.5 Resolution")
+        #labels_row = make_bold_names(cluster_matrix, rownames, c("WNN 4")),
+        #labels_col = make_bold_names(cluster_matrix, colnames, c("RNA 5")))
+        #xlab = "RNA Clusters",
+        #ylab = "WNN Clusters")
+```
+
+Based on this graph, RNA 5 is split into clusters 13 and 14 for colon.
+
+```{r}
+Idents(object = seurat_object.lung) <- "RNA_snn_res.2.5"
+Idents(object = seurat_object.colon) <- "RNA_snn_res.2.5"
+
+DimPlot(seurat_object.lung, reduction = "umap_rna", label = TRUE, repel = TRUE) + ggtitle("Lung Split 5 Clusters")
+
+DotPlot(seurat_object.lung, features = c(stem_like_gois, activation_like_gois)) + RotatedAxis() + ggtitle("Lung Split 5 Clusters by Stem and Activation Markers")
+
+DimPlot(seurat_object.colon, reduction = "umap_rna", label = TRUE, repel = TRUE) + ggtitle("Colon Split 5 Clusters")
+
+DotPlot(seurat_object.colon, features = c(stem_like_gois, activation_like_gois)) + RotatedAxis() + ggtitle("Colon Split 5 Clusters by Stem and Activation Markers")
+
+#stem_like_gois <- c("Ccr7", "Il7r", "Sell", "Tcf7", "Tcf1", "Slamf6", "Klf3", "Il16ra")
+#activation_like_gois <- c("Cd44", "Cd69", "Il17a", "Il17f", "Il22", "Ifng", "Mki67", "Csf2")
+```
+For the Lung, we are primarily focused on clusters 13, 16 and 17. 
+13 has higher levels of Ccr7, Sell, Slamf6, which implies it's the stem-like cluster
+16 has higher levels of Cd44 and some Il17a, which implies it's the activation-like cluster
+17 has higher levels of Il17a and Il17f, which implies it's the activation-like cluster
+
+For the Lung, we are primarily focused on clusters 13, and 14. 
+13 has higher levels of Il17a, Cd44, and Il17f, which implies it's the activation-like cluster. But it has Il17r also at higher levels
+14 doesn't really have higher expression levels in any gene of interest.
+
+```{r}
+cluster.5.split.markers.lung.stem <- FindMarkers(seurat_object.lung, ident.1 = 13, ident.2 = 16, only.pos = TRUE)
+cluster.5.split.markers.lung.gen <- FindMarkers(seurat_object.lung, ident.1 = 16, ident.2 = 13, only.pos = TRUE)
+cluster.5.split.markers.colon.stem <- FindMarkers(seurat_object.colon, ident.1 = 14, ident.2 = 13, only.pos = TRUE)
+cluster.5.split.markers.colon.gen <- FindMarkers(seurat_object.colon, ident.1 = 13, ident.2 = 14, only.pos = TRUE)
+```
+
+# Genes of Interest when splitting cluster 5:
+```{r}
+cluster.5.split.markers.lung.stem[row.names(cluster.5.split.markers.lung.stem) %in% stem_like_gois,]
+cluster.5.split.markers.lung.gen[row.names(cluster.5.split.markers.lung.gen) %in% activation_like_gois, ]
+
+cluster.5.split.markers.colon.stem[row.names(cluster.5.split.markers.colon.stem) %in% stem_like_gois, ]
+cluster.5.split.markers.colon.gen[row.names(cluster.5.split.markers.colon.gen) %in% activation_like_gois, ]
+```
+
+Could also make a seurat object with only cluster 5 cells instead
+
+

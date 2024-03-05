@@ -1,0 +1,249 @@
+---
+title: "Candida_sc_Pseudotime"
+author: "Nathan Morris"
+date: "2024-01-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Data Import
+```{r echo = TRUE, include= TRUE, error = FALSE, warning = FALSE, message=FALSE}
+# Data Import
+library(Seurat)
+library(scater)
+library(dplyr)
+library(SingleR)
+library(celldex)
+library(scRNAseq)
+library(scran)
+library(gridExtra)
+library(pheatmap)
+library(ess)
+library(reshape2)
+library(ggpubr)
+library(scCustomize)
+library(gridExtra)
+library(monocle3)
+
+## For Reticulate (Python-R wrapper)
+conda_list()
+use_condaenv("r-reticulate")    #activate an environment e.g py2_env
+py_install("opentsne")
+reticulate::py_install("phate", pip=TRUE)
+devtools::install_github("KrishnaswamyLab/phateR")
+py_install("fa2")
+```
+
+```{r}
+data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
+
+setwd(data_dir)
+
+seurat_object <- readRDS(file = paste0(data_dir, "dataset_clean_scRNA_ADT_new_metadata.Rds"))
+```
+
+# Pseudotime Analysis
+
+I've decided it's best to do it for CD4 and CD8 cells for each individual organ.
+```{r}
+#devtools::install_github("satijalab/seurat-wrappers")
+library(monocle3)
+```
+
+
+# Pseudotime CD4 Only
+
+```{r}
+seurat_object_CD4 <- readRDS(file = paste0(data_dir, "/CD4_data/seurat_object_CD4.rds"))
+#seurat_object_CD4_diff <- readRDS(file = paste0(data_dir, "seurat_object_CD4_diff.rds"))
+```
+
+```{r}
+DefaultAssay(seurat_object_CD4) <- "RNA"
+
+CD4_clust <- seurat_object_CD4$CD4_clust_annot
+seurat <- seurat_object_CD4
+CD4_clust <- seurat$CD4_clust_annot
+
+cds <- SeuratWrappers::as.cell_data_set(seurat)
+fData(cds)$gene_short_name <- rownames(fData(cds)) # Requires short names
+
+recreate.partition <- c(rep(1,length(cds@colData@rownames)))
+names(recreate.partition) <- cds@colData@rownames
+recreate.partition <- as.factor(recreate.partition)
+
+# UMAP
+cds@clusters$UMAP$partitions <- recreate.partition
+cds@clusters$UMAP$clusters <- CD4_clust
+cds@int_colData@listData$reducedDims$UMAP<- seurat@reductions$umap_cd4_@cell.embeddings
+
+pData(cds)$sample_name <- as.factor(pData(cds)$sample_name)
+#pData(cds) <- NULL
+pData(cds)$sample_name <- NULL
+cds <- learn_graph(cds, use_partition = FALSE)
+plot_list <- plot_cells(cds,
+         color_cells_by = "cluster",
+         label_groups_by_cluster = FALSE,
+         label_branch_points = FALSE,
+         label_roots = TRUE,
+         label_leaves = FALSE,
+         group_label_size = 5)
+
+cds <- order_cells(cds, reduction_method = "UMAP", root_cells = colnames(cds)[cds@colData@listData[["CD4_clust"]] %in% c(0,1,2)]) 
+
+
+pseudotime_plot_list <- plot_cells(cds,
+         color_cells_by = "pseudotime",
+         label_groups_by_cluster = FALSE,
+         label_branch_points = FALSE,
+         label_roots = FALSE,
+         label_leaves = FALSE,
+         group_label_size = 5)
+
+#cds$monocle3_pseudotime <- pseudotime(cds
+  
+  
+  pseudotime_plot_list <- plot_cells(cds,
+           color_cells_by = "CD4_pseudotime",
+           label_groups_by_cluster = FALSE,
+           label_branch_points = FALSE,
+           label_roots = FALSE,
+           label_leaves = FALSE)
+
+  cds$monocle3_pseudotime <- pseudotime(cds)
+  
+  # Adding Metadata
+  colData(cds)$CD4_clust <- cds@clusters@listData[["UMAP"]][["clusters"]]
+  colData(cds)$CD4_clust_copy <- CD4_clust
+  #colData(cds)$Organ_Inf <- organ_inf
+  #colData(cds)$Organ <- organ
+  data.pseudo <- as.data.frame(colData(cds))
+  
+  # Update the ident in Seurat object
+pseudotime_CD4 <- as.data.frame(cds@colData@listData[["CD4_pseudotime"]])
+colnames(pseudotime_CD4) <- c("CD4_pseudotime")
+pseudotime_CD4$barcodes <- rownames(pseudotime_CD4)
+
+merged_data <- merge(seurat_object_CD4@meta.data, pseudotime_CD4, by.x = "cell_barcode", by.y = "barcodes", all.x = TRUE)
+seurat_object_CD4$CD4_pseudotime <- merged_data$CD4_pseudotime.x
+
+
+  # Creating Final Plot
+  pseudotime_barplot_Cd4 <- ggplot(data.pseudo, aes(x = CD4_pseudotime, y = CD4_clust, fill = CD4_clust)) + geom_boxplot() + ggtitle("CD4 Clusters by Pseudotime") + theme(legend.position = "none")
+  
+  
+  library("RColorBrewer")
+  pseudotime_cd4_tsne <- FeaturePlot(seurat_object_CD4, feature = "CD4_pseudotime", reduction = "tsne_cd4_") + ggtitle("Pseudotime for CD4") + scale_colour_gradientn(colours = brewer.pal(n = 3, name = "YlOrRd"))
+  
+cd4_pseudo <- cowplot::plot_grid(pseudotime_cd4_tsne, pseudotime_barplot_Cd4, ncol = 2, rel_widths = c(1,0.8), labels = c("A", "B"), label_size = 20)
+
+
+  #cd4_pseudo <- FeaturePlot_scCustom(seurat_object_CD4, feature = "CD4_pseudotime", reduction = "fa2_cd4_", cols = c("black", "grey","red", "orange", "yellow", "green", "blue"))
+
+```
+
+# Pseudotime on all CD8
+
+```{r}
+seurat_object_CD8 <- readRDS(file = paste0(data_dir, "/CD8_data/seurat_object_CD8.rds"))
+```
+
+```{r}
+CD8_clust <- seurat_object_CD8$CD8_clust_annot
+seurat <- seurat_object_CD8
+CD8_clust <- seurat$CD8_clust_annot
+
+cds <- SeuratWrappers::as.cell_data_set(seurat)
+fData(cds)$gene_short_name <- rownames(fData(cds)) # Requires short names
+
+recreate.partition <- c(rep(1,length(cds@colData@rownames)))
+names(recreate.partition) <- cds@colData@rownames
+recreate.partition <- as.factor(recreate.partition)
+
+# UMAP
+cds@clusters$UMAP$partitions <- recreate.partition
+cds@clusters$UMAP$clusters <- CD8_clust
+cds@int_colData@listData$reducedDims$UMAP<- seurat@reductions$umap_cd8_@cell.embeddings
+
+pData(cds)$sample_name <- as.factor(pData(cds)$sample_name)
+#pData(cds) <- NULL
+pData(cds)$sample_name <- NULL
+cds <- learn_graph(cds, use_partition = FALSE)
+plot_list <- plot_cells(cds,
+         color_cells_by = "cluster",
+         label_groups_by_cluster = FALSE,
+         label_branch_points = FALSE,
+         label_roots = TRUE,
+         label_leaves = FALSE,
+         group_label_size = 5)
+
+cds <- order_cells(cds, reduction_method = "UMAP", root_cells = colnames(cds)[cds@colData@listData[["CD8_clust"]] %in% c(0,1,2)]) 
+
+
+pseudotime_plot_list <- plot_cells(cds,
+         color_cells_by = "pseudotime",
+         label_groups_by_cluster = FALSE,
+         label_branch_points = FALSE,
+         label_roots = FALSE,
+         label_leaves = FALSE,
+         group_label_size = 5)
+
+#cds$monocle3_pseudotime <- pseudotime(cds
+  
+  
+  pseudotime_plot_list <- plot_cells(cds,
+           color_cells_by = "CD8_pseudotime",
+           label_groups_by_cluster = FALSE,
+           label_branch_points = FALSE,
+           label_roots = FALSE,
+           label_leaves = FALSE)
+
+  cds$monocle3_pseudotime <- pseudotime(cds)
+  
+  # Adding Metadata
+  colData(cds)$CD8_clust <- cds@clusters@listData[["UMAP"]][["clusters"]]
+  colData(cds)$CD8_clust_copy <- CD8_clust
+  #colData(cds)$Organ_Inf <- organ_inf
+#  colData(cds)$Organ <- organ
+  data.pseudo <- as.data.frame(colData(cds))
+  
+  # Update the ident in Seurat object
+pseudotime_CD8 <- as.data.frame(cds@colData@listData[["CD8_pseudotime"]])
+colnames(pseudotime_CD8) <- c("CD8_pseudotime")
+pseudotime_CD8$barcodes <- rownames(pseudotime_CD8)
+
+merged_data <- merge(seurat_object_CD8@meta.data, pseudotime_CD8, by.x = "cell_barcode", by.y = "barcodes", all.x = TRUE)
+seurat_object_CD8$CD8_pseudotime <- merged_data$CD8_pseudotime.x
+
+
+  # Creating Final Plot
+  pseudotime_barplot_Cd8 <- ggplot(data.pseudo, aes(x = CD8_pseudotime, y = CD8_clust, fill = CD8_clust)) + geom_boxplot() + ggtitle("CD8 Clusters by Pseudotime") + theme(legend.position = "none")
+  
+  
+  library("RColorBrewer")
+  pseudotime_cd8_tsne <- FeaturePlot(seurat_object_CD8, feature = "CD8_pseudotime", reduction = "tsne_cd8_") + ggtitle("Pseudotime for CD8") + scale_colour_gradientn(colours = brewer.pal(n = 3, name = "YlOrRd"))
+  
+cd8_pseudo <- cowplot::plot_grid(pseudotime_cd8_tsne, pseudotime_barplot_Cd8, ncol = 2, rel_widths = c(1,0.8), labels = c("C", "D"), label_size = 20)
+
+
+  #cd4_pseudo <- FeaturePlot_scCustom(seurat_object_CD4, feature = "CD4_pseudotime", reduction = "fa2_cd4_", cols = c("black", "grey","red", "orange", "yellow", "green", "blue"))
+  
+```
+
+# Figure 11
+
+```{r}
+pseudo_cd4_cd8 <- cowplot::plot_grid(cd4_pseudo, cd8_pseudo, ncol = 1)
+```
+
+```{r}
+fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
+
+ggsave(filename = paste0(fig_directory, "figure_11.pdf"), plot = pseudo_cd4_cd8, device = "pdf", height = 28, width = 26)
+
+ggsave(filename = paste0(fig_directory, "figure_11.jpeg"), plot = pseudo_cd4_cd8, device = "jpeg", height = 28, width = 26)
+```
+
