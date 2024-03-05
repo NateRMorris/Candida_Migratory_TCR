@@ -13,29 +13,34 @@
         <h1>Candida Migratory TCR Project</h1>
         <nav>
             <ul>
-                <li><a href="/Candida_Migratory_TCR/contact.html">Contact</a></li>
+                <li><a href="/Candida_Migratory_TCR/contact.html">Contact Information</a></li>
+                <li><a href="#abstract">Abstract</a></li>
                 <li><a href="#project-introduction">Project Introduction</a></li>
                 <li><a href="#r-scripts">R Scripts</a></li>
                 <li><a href="#tcr-scripts">TCR Scripts</a></li>
                 <li><a href="#python-scripts">Python Scripts</a></li>
-                <li><a href="#data">Data</a></li>
-                <li><a href="#figures-tables">Figures & Tables</a></li>
                 <li><a href="#tcr-packages">TCR Packages</a></li>
+                <li><a href="#figures-tables">Figures & Tables</a></li>
             </ul>
         </nav>
     </header>
 
-    <section id="project-introduction">
-        <h2>Project Introduction</h2>
-        <p>.</p>
+    <section id="abstract">
+        <h2>Abstract</h2>
+        <p>The association of gut microbiota dysbiosis in lung diseases by the gut-lung axis has been widely observed. However, the underlying mechanisms of this association remain incompletely understood. Here, using a Candida albicans colonized gut mycobiota dysbiosis model and integrated analysis of single cell multimodal omics data (scRNA/Cite-seq/TCR) from immune cells in the colon, lung and mesenteric lymph node, we show that immunological response in the gut elicits a corresponding response in the lung, requiring cells with T helper 17 (Th17) cytokine profile for immunity, leading to a neutrophilic asthma-like phenotype. CD4+ T-cell response consists of Th17 cells, primed by C. albicans in the gut, that are actively recruited to the lung by the CCL5-CCR4 ligand-receptor interaction during colonization. Naive CD4+ T cell abundance declined in both the gut and lung during colonization. Although, TCR analysis shows there are few migratory clonotypes that are similar between the organs, suggesting gut-lung communication isn’t reliant on antigen-specificity to C. albicans, and pattern recognition receptors are too complex to be captured in a single clonotype. CD8 T-cell response, however, is organ specific and shows a distinct T-effector memory-like population localized in the gut. Here, we reveal mechanisms of the gut-lung communication under circumstances of dysbiotic mycobiota and propose cytokine signaling is responsible for the gut-lung communication by the immune system.</p>
     </section>
 
+    <section id="project-introduction">
+        <h2>Project Introduction</h2>
+        <p>Here, we study the gut-lung axis, and, in particular, the association and mechanisms that connect gut mycobiota dysbiosis to non-type 2 asthma by integrating scRNA, TCR and Cite-seq data from three mice colonized with Candida ablicans. Below, we outline the steps associated with the analysis by linking repositories to the analysis scripts and the figures developed from them. </p>
+    </section>
+    
     <section id="r-scripts">
         <h2>R Scripts for scRNA/Cite-Seq Analysis</h2>
-        <p>Scripts related to scRNA analysis and clustering.</p>
+        <p>Scripts related to scRNA analysis</p>
         <ul>
             <li>
-                <a href="/Candida_Migratory_TCR/Scripts/R/sc_RNA_scripts/Candida_sc_QC.Rmd">Candida_sc_QC.Rmd</a>
+                <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/sc_RNA_scripts/Candida_sc_QC.Rmd">Candida_sc_QC.Rmd</a>
                 <ul>
                     <li>- Quality control for single-cell RNA-seq and Cite-seq data</li>
                     <li>- Importing, removing outlier cells, demultiplexing</li>
@@ -44,7 +49,7 @@
                 </ul>
             </li>
             <li>
-                <a href="/Candida_Migratory_TCR/Scripts/R/sc_RNA_scripts/Candida_sc_CD4_CD8.Rmd">Candida_sc_CD4_CD8.Rmd</a>
+                <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/sc_RNA_scripts/Candida_sc_CD4_CD8.Rmd">Candida_sc_CD4_CD8.Rmd</a>
                 <ul>
                     <li>- Splitting our cells into CD4 and CD8 groups</li>
                     <li>- Dimension reduction, clustering, organ distribution per cluster, visualizing marker genes</li>
@@ -56,7 +61,7 @@
                 </ul>                
            </li>
             <li>
-                <a href="/Candida_Migratory_TCR/Scripts/R/sc_RNA_scripts/Candida_sc_diff_exp_&_annot_CD4CD8.Rmd">Candida_sc_diff_exp_&_annot_CD4CD8.Rmd</a>
+                <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/sc_RNA_scripts/Candida_sc_diff_exp_&_annot_CD4CD8.Rmd">Candida_sc_diff_exp_&_annot_CD4CD8.Rmd</a>
                 <ul>
                     <li>- Differential expression analysis (finding DEGs/marker gene expression, protein expression), cell type annotations</li>
                     <li>- Gene ontology and pathway analysis</li>
@@ -79,7 +84,7 @@
                 </ul>
             </li>
             <li>
-                <a href="/Candida_Migratory_TCR/Scripts/R/sc_RNA_scripts/Candida_sc_diff_abundance.Rmd">Candida_sc_diff_abundance.Rmd</a>
+                <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/sc_RNA_scripts/Candida_sc_diff_abundance.Rmd">Candida_sc_diff_abundance.Rmd</a>
                 <ul>
                     <li>- Differential abundance analysis using two proportions Z-test</li>
                     <li>- Figures:</li>
@@ -94,7 +99,7 @@
                 </ul>
             </li>
             <li>
-                <a href="/Candida_Migratory_TCR/Scripts/R/sc_RNA_scripts/Candida_sc_Pseudotime.Rmd">Candida_sc_Pseudotime.Rmd</a>
+                <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/sc_RNA_scripts/Candida_sc_Pseudotime.Rmd">Candida_sc_Pseudotime.Rmd</a>
                 <ul>
                     <li>- Pseudotime analysis / trajectory inference using Monocle3</li>
                     <li>- Figures:</li>
@@ -105,12 +110,11 @@
                 </ul>
             </li>
             <li>
-                <a href="/Candida_Migratory_TCR/Scripts/R/sc_RNA_scripts/Candida_sc_CellChat.Rmd">Candida_sc_CellChat.Rmd</a>
+                <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/sc_RNA_scripts/Candida_sc_CellChat.Rmd">Candida_sc_CellChat.Rmd</a>
                 <ul>
                     <li>- Cell-cell communication inference, analysis and visualization using CellChat</li>
                     <li>- Figures:</li>
                     <ul>
-                        <li><b>Both Subsets</b></li>
                         <li>- Figure 12: Cell-cell signaling by infection state (metrics of communication) - <a href="/Candida_Migratory_TCR/Figures_Tables/figure_12.jpeg">figure_12.jpeg</a></li>
                         <li>- Figure 13: Signaling pathway analysis between clusters - <a href="/Candida_Migratory_TCR/Figures_Tables/figure_13.jpeg">figure_13.jpeg</a></li>
                         <li>- Circle plots for interaction visualization - <a href="/Candida_Migratory_TCR/Figures_Tables/supplemental_10a.jpeg">supplemental_10a.jpeg</a><a href="/Candida_Migratory_TCR/Figures_Tables/supplemental_10b.jpeg">supplemental_10b.jpeg</a><a href="/Candida_Migratory_TCR/Figures_Tables/supplemental_10c.jpeg">supplemental_10c.jpeg</a><a href="/Candida_Migratory_TCR/Figures_Tables/supplemental_10d.jpeg">supplemental_10d.jpeg</a></li>
@@ -118,14 +122,14 @@
                 </ul>
             </li>
         </ul>
-        <p>GitHub Repository: <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/sc_RNA_scripts" target="_blank">R Scripts Repository</a></p>
+        <p>GitHub Repository for all scRNA scripts: <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/sc_RNA_scripts" target="_blank">scRNA Scripts Repository</a></p>
     </section>
 
     <section id="tcr-scripts">
         <h2>R Scripts for TCR Analysis and Integration</h2>
         <p>Scripts related to TCR analysis and diversity.</p>
         <ul>
-            <li><a href="/Candida_Migratory_TCR/Scripts/R/tcr_Scripts/Candida_tcr_paired.Rmd">Candida_tcr_paired.Rmd</a>
+            <li><a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/tcr_Scripts/Candida_tcr_paired.Rmd">Candida_tcr_paired.Rmd</a>
                 <ul>
                     <li>- Indentifying and analyzing TCR sequences that are identical and found in cells from multiple organs, also considered "paired across organ", or migratory between organ.</li>
                     <li>- Figures:</li>
@@ -133,11 +137,11 @@
                         <li>- Figure 16: Migratory clonotypes in each mouse and infection state- <a href="/Candida_Migratory_TCR/Figures_Tables/figure_16.jpeg">figure_16.jpeg</a></li>
                    </ul>
                 </ul>
-            <li><a href="/Candida_Migratory_TCR/Scripts/R/tcr_Scripts/Candida_tcr_duplicate.Rmd">Candida_tcr_duplicate.Rmd</a>
+            <li><a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/tcr_Scripts/Candida_tcr_duplicate.Rmd">Candida_tcr_duplicate.Rmd</a>
                 <ul>
                     <li>- Identification and analyzing proliferative/"duplicate" TCR sequences, which are found in multiple cells and therefore are proliferating.</li>
                 </ul>
-            <li><a href="/Candida_Migratory_TCR/Scripts/R/tcr_Scripts/Candida_tcr_seurat_integration.Rmd">Candida_tcr_seurat_integration.Rmd</a>
+            <li><a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/tcr_Scripts/Candida_tcr_seurat_integration.Rmd">Candida_tcr_seurat_integration.Rmd</a>
                 <ul>
                     <li>- Integration of TCR data with Seurat scRNA data.</li>
                     <li>- Figures:</li>
@@ -145,7 +149,7 @@
                         <li>- Figure 14: Proliferative clonotypes for each mouse and infection state - <a href="/Candida_Migratory_TCR/Figures_Tables/figure_14.jpeg">figure_14.jpeg</a></li>
                    </ul>
                 </ul>
-            <li><a href="/Candida_Migratory_TCR/Scripts/R/tcr_Scripts/Candida_tcr_Diversity.Rmd">Candida_tcr_Diversity.Rmd</a>
+            <li><a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/tcr_Scripts/Candida_tcr_Diversity.Rmd">Candida_tcr_Diversity.Rmd</a>
                 <ul>
                     <li>- Diversity analysis and diversity metric calculation of TCR sequences</li>
                     <li>- CDR3/Clonotype length analysis</li>
@@ -156,16 +160,16 @@
                         <li>- Figure 15: Gini index diversity calculation- <a href="/Candida_Migratory_TCR/Figures_Tables/figure_15.jpeg">figure_15.jpeg</a></li>
                     </ul>
                 </ul>
-            <li><a href="/Candida_Migratory_TCR/Scripts/R/tcr_Scripts/Candida_tcr_Gearty_assumption.Rmd">Candida_tcr_Gearty_assumption.Rmd</a>
+            <li><a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/tcr_Scripts/Candida_tcr_Gearty_assumption.Rmd">Candida_tcr_Gearty_assumption.Rmd</a>
                 <ul>
                     <li>- Analysis based on Gearty's assumptions.</li>
                 </ul>
-            <li><a href="/Candida_Migratory_TCR/Scripts/R/tcr_Scripts/Candida_tcr_Cytoscape.Rmd">Candida_tcr_Cytoscape.Rmd</a>
+            <li><a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/tcr_Scripts/Candida_tcr_Cytoscape.Rmd">Candida_tcr_Cytoscape.Rmd</a>
                 <ul>
                     <li>- Visualization of shared TCRs and proliferative TCRs using Cytoscape.</li>
                 </ul>
         </ul>
-        <p>GitHub Repository: <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/tcr_Scripts" target="_blank">TCR Scripts Repository</a></p>
+        <p>GitHub Repository for all tcr scripts: <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/tcr_Scripts/" target="_blank">TCR Scripts</a></p>
     </section>
 
     <section id="python-scripts">
@@ -175,7 +179,7 @@
             <li><a href="/Candida_Migratory_TCR/Scripts/R/py_scripts/TCR_Scipy.ipynb">TCR_Scipy.ipynb</a>
                 - Using scipy for TCR analysis.</li>
         </ul>
-        <p>GitHub Repository: <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/py_scripts" target="_blank">TCR Scripts Repository</a></p>
+        <p>GitHub Repository for all python scripts: <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/py_scripts" target="_blank">Python Scripts</a></p>
     </section>
 
     <section id="tcr_Packages">
@@ -191,12 +195,11 @@
                     <li>- Cytoscape figure and file to remake figure.</li>
                 </ul>
         </ul>
-        <p>GitHub Repository: <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/tcr_Packages" target="_blank">TCR Scripts Repository</a></p>
-    </section>
+   </section>
 
     <section id="Figures_Tables">
         <h2>Figures/Tables</h2>
         <p>Figures and Tables created during analysis, including Cytoscape Plots and Differentially Expressed Genes/Surface proteins per cluster and organ</p>
 
-        <p>GitHub Repository: <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/tcr_Packages" target="_blank">TCR Scripts Repository</a></p>
+        <p>GitHub Repository for all figures and tables: <a href="https://github.com/NateRMorris/Candida_Migratory_TCR/tree/main/Figures_Tables" target="_blank">Figures and Tables</a></p>
     </section>

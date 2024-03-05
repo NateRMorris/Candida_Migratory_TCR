@@ -42,3 +42,19 @@ a {
 a:hover {
     text-decoration: underline;
 }
+
+#r-scripts a {
+    font-size: 20px; /* Adjust the font size as needed */
+    text-decoration: underline; /* Underline the link */
+}
+
+#tcr-scripts a {
+    font-size: 20px; /* Adjust the font size as needed */
+    text-decoration: underline; /* Underline the link */
+}
+
+#python-scripts a {
+    font-size: 20px; /* Adjust the font size as needed */
+    text-decoration: underline; /* Underline the link */
+}
+
