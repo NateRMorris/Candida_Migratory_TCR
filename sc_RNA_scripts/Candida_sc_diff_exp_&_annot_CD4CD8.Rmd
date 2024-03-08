@@ -206,7 +206,7 @@ feature_plots_list_adt <- lapply(features_cd4_adt, create_feature_plot_CD4)
 
 DefaultAssay(seurat_object_CD4) <- "RNA"
 features_cd4_rna <- c("Foxp3", "Tbx21", "Il17a", "Rorc", "Ccr6", "Ccr7", "Gata3", "Il4", "Il10", "Lef1", "Sell", "Ccl5", "Ddit4")
-feature_plots_list_rna <- lapply(features_cd4_rna, create_feature_plot)
+feature_plots_list_rna <- lapply(features_cd4_rna, create_feature_plot_CD4)
 
 
 feature_plots_all <- c(feature_plots_list_adt, feature_plots_list_rna)
@@ -1412,3 +1412,17 @@ cowplot::plot_grid(cd4_annot_feat, cd4_abundance_dot, ncol = 1)
 
 ```
 
+
+# Figure for Iliyan 03_08_2023
+
+```{r}
+
+#abundance_figure_cd4 Taken from diff_abundance RMD file. Removed A,B,C and added only C
+fig1_iliyan_03_08 <- cowplot::plot_grid(cd4_annot_feat, abundance_figure_cd4,cd4_dot_plot_annot , ncol = 1, labels = c("", "", "E"), rel_heights = c(0.8, 1, 0.4)) 
+
+
+
+
+
+
+```
