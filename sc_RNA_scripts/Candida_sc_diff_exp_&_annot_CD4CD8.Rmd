@@ -548,11 +548,15 @@ clust_GO <- compareCluster(entrezid~cluster, data = cd4_t_cell_marker_up_sig, Or
 #cnetplot(clust_GO, categorySize="pvalue", node_label = "category", circular = TRUE)
 #cnetplot(clust_GO, categorySize="pvalue", node_label = "gene", circular = TRUE)
 
-fig6a <- clusterProfiler::dotplot(clust_GO, showCategory=5, font.size = 8) + ggtitle("CD4 Cluster GO ORA")
+clust_go_simp <- simplify(clust_GO)
+
+clust_go_simp <- pairwise_termsim(clust_go_simp)
+
+fig6a <- clusterProfiler::dotplot(clust_go_simp, font.size = 8) + ggtitle("CD4 Cluster GO ORA")
 
 clust_GO <- pairwise_termsim(clust_GO)
-fig6b <- treeplot(clust_GO, showCategory = 5)
-fig6c <- emapplot(clust_GO, showCategory = 5)
+fig6b <- treeplot(clust_go_simp, showCategory = 5) #, showCategory = 5
+fig6c <- emapplot(clust_go_simp, showCategory = 5)
 ```
 
 ```{r}
@@ -1230,11 +1234,17 @@ clust_GO <- compareCluster(entrezid~cluster, data = cd8_t_cell_marker_up_sig, Or
 #cnetplot(clust_GO, categorySize="pvalue", node_label = "category", circular = TRUE)
 #cnetplot(clust_GO, categorySize="pvalue", node_label = "gene", circular = TRUE)
 
-fig7a <- clusterProfiler::dotplot(clust_GO, showCategory=5, font.size = 8) + ggtitle("CD4 Cluster GO ORA")
-
 clust_GO <- pairwise_termsim(clust_GO)
-fig7b <- treeplot(clust_GO, showCategory = 5)
-fig7c <- emapplot(clust_GO, showCategory = 5)
+
+clust_go_simp <- simplify(clust_GO)
+
+clust_go_simp <- pairwise_termsim(clust_go_simp)
+
+fig7a <- clusterProfiler::dotplot(clust_go_simp, font.size = 8) + ggtitle("CD8 Cluster GO ORA")
+#showCategory=5,
+
+fig7b <- treeplot(clust_go_simp) #, showCategory = 5)
+fig7c <- emapplot(clust_go_simp, showCategory = 5) #, showCategory = 5)
 ```
 
 ```{r}
