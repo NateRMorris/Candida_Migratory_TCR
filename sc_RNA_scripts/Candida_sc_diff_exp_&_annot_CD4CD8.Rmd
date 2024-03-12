@@ -41,7 +41,9 @@ py_install("opentsne")
 reticulate::py_install("phate", pip=TRUE)
 devtools::install_github("KrishnaswamyLab/phateR")
 py_install("fa2")
+```
 
+```{r}
 data_dir <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/"
 
 setwd(data_dir)
@@ -552,20 +554,20 @@ clust_go_simp <- simplify(clust_GO)
 
 clust_go_simp <- pairwise_termsim(clust_go_simp)
 
-fig6a <- clusterProfiler::dotplot(clust_go_simp, font.size = 8) + ggtitle("CD4 Cluster GO ORA")
+fig6a <- clusterProfiler::dotplot(clust_go_simp, font.size = 14) + ggtitle("CD4 Cluster GO ORA")
 
-clust_GO <- pairwise_termsim(clust_GO)
-fig6b <- treeplot(clust_go_simp, showCategory = 5) #, showCategory = 5
-fig6c <- emapplot(clust_go_simp, showCategory = 5)
+#clust_GO <- pairwise_termsim(clust_GO)
+fig6b <- treeplot(clust_go_simp, showCategory = 5, fontsize = 8, label_format = 20) #, showCategory = 5
+fig6c <- emapplot(clust_go_simp, showCategory = 5, cex.params = list(category_label = 2.5))
 ```
 
 ```{r}
 fig6bc <- cowplot::plot_grid(fig6b, fig6c, ncol = 2, labels = c("B", "C"), label_size = 35)
 fig6abc <- cowplot::plot_grid(fig6a, fig6bc, ncol = 1, labels = c("A", ""), label_size = 35)
 
-ggsave(filename = paste0(fig_directory, "figure_6.pdf"), plot = fig6abc, device = "pdf", height = 25, width = 35)
+ggsave(filename = paste0(fig_directory, "figure_6.pdf"), plot = fig6abc, device = "pdf", height = 35, width = 35)
 
-ggsave(filename = paste0(fig_directory, "figure_6.jpeg"), plot = fig6abc, device = "jpeg", height = 25, width = 35)
+ggsave(filename = paste0(fig_directory, "figure_6.jpeg"), plot = fig6abc, device = "jpeg", height = 35, width = 35)
 ```
 
 
@@ -1234,26 +1236,26 @@ clust_GO <- compareCluster(entrezid~cluster, data = cd8_t_cell_marker_up_sig, Or
 #cnetplot(clust_GO, categorySize="pvalue", node_label = "category", circular = TRUE)
 #cnetplot(clust_GO, categorySize="pvalue", node_label = "gene", circular = TRUE)
 
-clust_GO <- pairwise_termsim(clust_GO)
+#clust_GO <- pairwise_termsim(clust_GO)
 
 clust_go_simp <- simplify(clust_GO)
 
 clust_go_simp <- pairwise_termsim(clust_go_simp)
 
-fig7a <- clusterProfiler::dotplot(clust_go_simp, font.size = 8) + ggtitle("CD8 Cluster GO ORA")
+fig7a <- clusterProfiler::dotplot(clust_go_simp, font.size = 14) + ggtitle("CD8 Cluster GO ORA")
 #showCategory=5,
 
-fig7b <- treeplot(clust_go_simp) #, showCategory = 5)
-fig7c <- emapplot(clust_go_simp, showCategory = 5) #, showCategory = 5)
+fig7b <- treeplot(clust_go_simp, showCategory = 5, fontsize = 8, label_format = 20) #, showCategory = 5)
+fig7c <- emapplot(clust_go_simp, showCategory = 5, cex.params = list(category_label = 2.5))
 ```
 
 ```{r}
 fig7bc <- cowplot::plot_grid(fig7b, fig7c, ncol = 2, labels = c("B", "C"), label_size = 35)
 fig7abc <- cowplot::plot_grid(fig7a, fig7bc, ncol = 1, labels = c("A", ""), label_size = 35)
 
-ggsave(filename = paste0(fig_directory, "figure_7.pdf"), plot = fig7abc, device = "pdf", height = 25, width = 35)
+ggsave(filename = paste0(fig_directory, "figure_7.pdf"), plot = fig7abc, device = "pdf", height = 35, width = 35)
 
-ggsave(filename = paste0(fig_directory, "figure_7.jpeg"), plot = fig7abc, device = "jpeg", height = 25, width = 35)
+ggsave(filename = paste0(fig_directory, "figure_7.jpeg"), plot = fig7abc, device = "jpeg", height = 35, width = 35)
 ```
 
 # Supplemental Figure OPTIONAL
