@@ -185,7 +185,7 @@ for (mouse in mice) {
 
 For the Yeast IBD paper that Dr. Iliev sent, they actually use only 500 samples for each individual per fungal infection to determine the Gini index. Therefore, we should downsample as well to observe an equal number of cells from each sample. 
 
-```{r}
+```
 length(which(IGT27_TCR$Mouse == "mouse0082"))
 length(which(IGT27_TCR$Mouse == "mouse0080"))
 length(which(IGT27_TCR$Mouse == "mouse0081"))
@@ -195,7 +195,7 @@ Here, I select 500 samples from each mouse, and then within each of these 500 sa
 
 For these, I decided to base the gini index on the AA sequence of the beta and the cdr3.
 
-```{r}
+```
 gini_indices_mouse_downsample_clonotype_list <- list()
 gini_indices_mouse_downsample_beta_list <- list()
 gini_indices_mouse_downsample_cdr3_list <- list()
@@ -317,18 +317,18 @@ gf_new <- gf[gf$cluster %in% colnames(values_cluster)[which(values_cluster["0",]
 fig_15 <- ggplot(gf_new, aes(x = Mouse_New, y = value, color = Mouse_New)) +
   geom_point(stat = "identity", size = 1.5) +
   #((aes(shape = organ, size = 1.5)))
-  labs(x = "Cluster", y = "Gini Index Value", title = "Dotplot of Gini Index Values for each Mouse by Organ within Clusters", fill = "Organ") + 
-    facet_wrap(~ cluster, scales = "free_x", nrow = 1) + # If I want to use this, change color = organ and rid of stuff in geom_point
-    theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.margin = margin(l = 25))  # Rotate x-axis labels by 45 degrees
+  labs(x = "Cluster", y = "Gini Index Value", title = "Dotplot of Gini Index Values for each Mouse by Organ within Clusters", fill = "Organ", color = "Mice") + 
+    facet_wrap(~ cluster, scales = "free_x", nrow = 1, labeller = label_wrap_gen(width=8)) + # If I want to use this, change color = organ and rid of stuff in geom_point
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.margin = margin(l = 30))
 ```
 
 
 ```{r}
 fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
 
-ggsave(filename = paste0(fig_directory, "figure_15.pdf"), plot = fig_15, device = "pdf", height = 12, width = 24)
+ggsave(filename = paste0(fig_directory, "figure_15.pdf"), plot = fig_15, device = "pdf", height = 6, width = 14)
 
-ggsave(filename = paste0(fig_directory, "figure_15.jpeg"), plot = fig_15, device = "jpeg", height = 12, width = 24)
+ggsave(filename = paste0(fig_directory, "figure_15.jpeg"), plot = fig_15, device = "jpeg", height = 6, width = 12)
 ```
 
 Many of the clusters have a 0 gini index. The Gini index computation is 0 when all TCR clonotypes have the same abundance (vector of clonotype frequencies is all 1s). The Gini index is NA when there are no TCRs within that mouse/organ/cluster combination.

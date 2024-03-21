@@ -98,7 +98,7 @@ length(unique(cd4_t_cell_marker$gene))
 table(table(cd4_t_cell_marker$gene))
 ```
 
-# Supplemental Figure 6 - CD4 Volcano Plots
+# Supplemental Figure 4 - CD4 Volcano Plots
 
 ```{r}
 library(EnhancedVolcano)
@@ -113,7 +113,7 @@ for (clust in unique(cd4_t_cell_marker_all$cluster)){
   volcano_list[[clust]] <- EnhancedVolcano(res,
     lab = res$gene,
     x = 'avg_log2FC',
-    y = 'p_val_adj', axisLabSize = 6, titleLabSize = 8, title = paste0("Cluster ",clust), subtitle = NULL,  captionLabSize = 6, labSize = 3, drawConnectors = TRUE,
+    y = 'p_val_adj', axisLabSize = 10, titleLabSize = 10, title = paste0("Cluster ",clust), subtitle = NULL,  captionLabSize = 9, labSize = 5, drawConnectors = TRUE,
     widthConnectors = 0.5,
     colConnectors = 'black') + NoLegend()
   #, selectLab = selected_gene_names,
@@ -122,17 +122,31 @@ for (clust in unique(cd4_t_cell_marker_all$cluster)){
 
 ```{r}
 volcano_grid_plot_cd4 <- cowplot::plot_grid(plotlist = volcano_list, ncol = 4)
+
+volcano_grid_plot_cd4_1 <- cowplot::plot_grid(plotlist = volcano_list[0:10], ncol = 2)
+
+volcano_grid_plot_cd4_2 <- cowplot::plot_grid(plotlist = volcano_list[11:17], ncol = 2)
 ```
 
 ```{r}
 fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
 
-ggsave(filename = paste0(fig_directory, "supplemental_6.pdf"), plot = volcano_grid_plot_cd4, device = "pdf", height = 16, width = 16)
+ggsave(filename = paste0(fig_directory, "supplemental_4.pdf"), plot = volcano_grid_plot_cd4, device = "pdf", height = 16, width = 16)
 
-ggsave(filename = paste0(fig_directory, "supplemental_6.jpeg"), plot = volcano_grid_plot_cd4, device = "jpeg", height = 16, width = 16)
+ggsave(filename = paste0(fig_directory, "supplemental_4.jpeg"), plot = volcano_grid_plot_cd4, device = "jpeg", height = 16, width = 16)
+
+# Split in Two for Thesis Paper
+
+ggsave(filename = paste0(fig_directory, "supplemental_4_1.pdf"), plot = volcano_grid_plot_cd4_1, device = "pdf", height = 16, width = 10)
+
+ggsave(filename = paste0(fig_directory, "supplemental_4_1.jpeg"), plot = volcano_grid_plot_cd4_1, device = "jpeg", height = 16, width = 10)
+
+ggsave(filename = paste0(fig_directory, "supplemental_4_2.pdf"), plot = volcano_grid_plot_cd4_2, device = "pdf", height = 16, width = 10)
+
+ggsave(filename = paste0(fig_directory, "supplemental_4_2.jpeg"), plot = volcano_grid_plot_cd4_2, device = "jpeg", height = 16, width = 10)
 ```
 
-# Supplemental Figure 7 - Cell Cycle Score
+# Supplemental Figure 5 - Cell Cycle Score
 
 ```{r}
 s.genes <- cc.genes$s.genes
@@ -558,6 +572,7 @@ fig6a <- clusterProfiler::dotplot(clust_go_simp, font.size = 14) + ggtitle("CD4 
 
 #clust_GO <- pairwise_termsim(clust_GO)
 fig6b <- treeplot(clust_go_simp, showCategory = 5, fontsize = 8, label_format = 20) #, showCategory = 5
+
 fig6c <- emapplot(clust_go_simp, showCategory = 5, cex.params = list(category_label = 2.5))
 ```
 
@@ -570,20 +585,53 @@ ggsave(filename = paste0(fig_directory, "figure_6.pdf"), plot = fig6abc, device 
 ggsave(filename = paste0(fig_directory, "figure_6.jpeg"), plot = fig6abc, device = "jpeg", height = 35, width = 35)
 ```
 
+```{r}
+# Splitting for Thesis
 
-# Supplemental Figure 10 - KEGG ENRICHMENT
+#A
+fig6a <- clusterProfiler::dotplot(clust_go_simp, font.size = 20) + ggtitle("CD4 Cluster GO ORA") + theme(plot.title = element_text(size=30))
+
+fig6a_label <- cowplot::plot_grid(fig6a, labels = c("A"), label_size = 35)
+
+ggsave(filename = paste0(fig_directory, "figure_6_a.pdf"), plot = fig6a_label, device = "pdf", height = 25, width = 18)
+
+ggsave(filename = paste0(fig_directory, "figure_6_a.jpeg"), plot = fig6a_label, device = "jpeg", height = 25, width = 18)
+
+# B
+
+fig6b <- treeplot(clust_go_simp, showCategory = 5, fontsize = 8, label_format = 12, offset_tiplab = 13) #, showCategory = 5
+
+fig6b_label <- cowplot::plot_grid(fig6b, labels = c("B"), label_size = 35)
+
+ggsave(filename = paste0(fig_directory, "figure_6_b.pdf"), plot = fig6b_label, device = "pdf", height = 14, width = 20)
+
+ggsave(filename = paste0(fig_directory, "figure_6_b.jpeg"), plot = fig6b_label, device = "jpeg", height = 14, width = 20)
+
+# C
+
+fig6c <- emapplot(clust_go_simp, showCategory = 5, cex.params = list(category_label = 2))
+
+fig6c_label <- cowplot::plot_grid(fig6c, labels = c("C"), label_size = 35)
+
+ggsave(filename = paste0(fig_directory, "figure_6_c.pdf"), plot = fig6c_label, device = "pdf", height = 15, width = 15)
+
+ggsave(filename = paste0(fig_directory, "figure_6_c.jpeg"), plot = fig6c_label, device = "jpeg", height = 15, width = 15)
+```
+
+
+# Supplemental Figure 8 - KEGG ENRICHMENT
 ```{r}
 
 # KEGG Pathways Analysis
 clust_KEGG <- compareCluster(entrezid~cluster, data = cd4_t_cell_marker_up_sig, organism = "mouse", fun = "enrichKEGG", pvalueCutoff = 0.05, pAdjustMethod = "BH")
 
-supp10 <- dotplot(clust_KEGG, showCategory=3, font.size = 8) + ggtitle("CD4 Cluster KEGG ORA")
+supp8 <- dotplot(clust_KEGG, showCategory=3, font.size = 15) + ggtitle("CD4 Cluster KEGG ORA") + theme(plot.title = element_text(size=24))
 
 #treeplot(clust_KEGG)
 
-ggsave(filename = paste0(fig_directory, "supplemental_10.pdf"), plot = supp10, device = "pdf", height = 12, width = 16)
+ggsave(filename = paste0(fig_directory, "supplemental_8.pdf"), plot = supp8, device = "pdf", height = 20, width = 12)
 
-ggsave(filename = paste0(fig_directory, "supplemental_10.jpeg"), plot = supp10, device = "jpeg", height = 12, width = 16)
+ggsave(filename = paste0(fig_directory, "supplemental_8.jpeg"), plot = supp8, device = "jpeg", height = 20, width = 12)
 
 ```
 
@@ -814,7 +862,7 @@ length(unique(cd8_t_cell_marker$gene))
 table(table(cd8_t_cell_marker$gene))
 ```
 
-# Supplemental Figure 8 - CD8 Volcano Plot
+# Supplemental Figure 6 - CD8 Volcano Plot
 
 ```{r}
 library(EnhancedVolcano)
@@ -829,7 +877,7 @@ for (clust in unique(cd8_t_cell_marker_all$cluster)){
   volcano_list[[clust]] <- EnhancedVolcano(res,
     lab = res$gene,
     x = 'avg_log2FC',
-    y = 'p_val_adj', axisLabSize = 6, titleLabSize = 8, title = paste0("Cluster ",clust), subtitle = NULL,  captionLabSize = 6, labSize = 3, drawConnectors = TRUE,
+    y = 'p_val_adj', axisLabSize = 10, titleLabSize = 10, title = paste0("Cluster ",clust), subtitle = NULL,  captionLabSize = 9, labSize = 5, drawConnectors = TRUE,
     widthConnectors = 0.5,
     colConnectors = 'black') + NoLegend()
   #, selectLab = selected_gene_names,
@@ -838,17 +886,28 @@ for (clust in unique(cd8_t_cell_marker_all$cluster)){
 
 ```{r}
 volcano_grid_plot_cd8 <- cowplot::plot_grid(plotlist = volcano_list, ncol = 4)
+
+# Split for Thesis paper
+
+volcano_grid_plot_cd8_1 <- cowplot::plot_grid(plotlist = volcano_list, ncol = 2)
+
 ```
 
 ```{r}
 fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
 
-ggsave(filename = paste0(fig_directory, "supplemental_8.pdf"), plot = volcano_grid_plot_cd8, device = "pdf", height = 16, width = 16)
+ggsave(filename = paste0(fig_directory, "supplemental_6.pdf"), plot = volcano_grid_plot_cd8, device = "pdf", height = 16, width = 16)
 
-ggsave(filename = paste0(fig_directory, "supplemental_8.jpeg"), plot = volcano_grid_plot_cd8, device = "jpeg", height = 16, width = 16)
+ggsave(filename = paste0(fig_directory, "supplemental_6.jpeg"), plot = volcano_grid_plot_cd8, device = "jpeg", height = 16, width = 16)
+
+# Enlarged for Thesis
+
+ggsave(filename = paste0(fig_directory, "supplemental_6_1.pdf"), plot = volcano_grid_plot_cd8_1, device = "pdf", height = 16, width = 10)
+
+ggsave(filename = paste0(fig_directory, "supplemental_6_1.jpeg"), plot = volcano_grid_plot_cd8_1, device = "jpeg", height = 16, width = 10)
 ```
 
-# Supplemental Figure 9 - Cell Cycle Score
+# Supplemental Figure 7 - Cell Cycle Score
 
 ```{r}
 s.genes <- cc.genes$s.genes
@@ -1258,6 +1317,40 @@ ggsave(filename = paste0(fig_directory, "figure_7.pdf"), plot = fig7abc, device 
 ggsave(filename = paste0(fig_directory, "figure_7.jpeg"), plot = fig7abc, device = "jpeg", height = 35, width = 35)
 ```
 
+```{r}
+# Thesis figs
+
+#A
+fig7a <- clusterProfiler::dotplot(clust_go_simp, font.size = 20) + ggtitle("CD8 Cluster GO ORA") + theme(plot.title = element_text(size=30))
+
+fig7a_label <- cowplot::plot_grid(fig7a, labels = c("A"), label_size = 35)
+
+ggsave(filename = paste0(fig_directory, "figure_7_a.pdf"), plot = fig7a_label, device = "pdf", height = 25, width = 18)
+
+ggsave(filename = paste0(fig_directory, "figure_7_a.jpeg"), plot = fig7a_label, device = "jpeg", height = 25, width = 18)
+
+# B
+
+fig7b <- treeplot(clust_go_simp, showCategory = 5, fontsize = 6, hexpand= 0.25) # label_format = 12, offset_tiplab = 13, hexpand = 5) #, showCategory = 5
+
+fig7b_label <- cowplot::plot_grid(fig7b, labels = c("B"), label_size = 35)
+
+ggsave(filename = paste0(fig_directory, "figure_7_b.pdf"), plot = fig7b_label, device = "pdf", height = 10, width = 15)
+
+ggsave(filename = paste0(fig_directory, "figure_7_b.jpeg"), plot = fig7b_label, device = "jpeg", height = 10, width = 15)
+
+# C
+
+fig7c <- emapplot(clust_go_simp, showCategory = 5, cex.params = list(category_label = 2))
+
+fig7c_label <- cowplot::plot_grid(fig7c, labels = c("C"), label_size = 35)
+
+ggsave(filename = paste0(fig_directory, "figure_7_c.pdf"), plot = fig7c_label, device = "pdf", height = 14, width = 14)
+
+ggsave(filename = paste0(fig_directory, "figure_7_c.jpeg"), plot = fig7c_label, device = "jpeg", height = 14, width = 14)
+
+```
+
 # Supplemental Figure OPTIONAL
 
 ```{r}
@@ -1382,10 +1475,10 @@ Neuron <- c("Calca", "Ramp1", "Ramp3", "Ntrk3", "Gch1", "Nr3c1", "Bex3")
 Idents(seurat_object_annot) <- "CD_annot"
 
 # Split
-VlnPlot(seurat_object_annot, features = Neuron, group.by = "CD_annot", stack = TRUE, flip = TRUE, fill.by = "ident", split.by = "Infection") + NoLegend()
+VlnPlot(seurat_object_annot, features = Neuron, group.by = "CD_annot", stack = TRUE, flip = TRUE, fill.by = "ident", split.by = "Infection") + NoLegend() + theme(plot.margin=unit(c(1,2,1,1), 'cm'))
 
 # No Split
-fig_10 <- VlnPlot(seurat_object_annot, features = Neuron, group.by = "CD_annot", stack = TRUE, flip = TRUE, fill.by = "ident") + NoLegend()
+fig_10 <- VlnPlot(seurat_object_annot, features = Neuron, group.by = "CD_annot", stack = TRUE, flip = TRUE, fill.by = "ident") + NoLegend() + theme(plot.margin=unit(c(1,2,1,1), 'cm'))
 
 ggsave(filename = paste0(fig_directory, "figure_10.pdf"), plot = fig_10, device = "pdf", height = 12, width = 16)
 

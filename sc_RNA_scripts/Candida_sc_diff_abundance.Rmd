@@ -277,7 +277,7 @@ aes(xmin = start, xmax = end, annotations = label, y_position = y), textsize = 3
 
 # Fig 8 Part 2
 ```{r}
-
+library(paletteer)
 CD4_colors <- c("#373634", "#F7B6D2", "#F8EED1", "#14FFB1", "purple" ,paletteer_d("ggthemes::calc"))
 CD4_colors_annot <- CD4_colors[c(1,2, 4:17)]
 CD4_colors_sig <- c("grey", "grey", "#14FFB1", "purple", "grey", "#FF420EFF", "grey", "grey", "grey", "grey", "grey", "grey", "grey", "grey", "grey", "grey")
@@ -307,17 +307,22 @@ cd4_lung_inf_title <- cowplot::plot_grid(title, cd4_lung_inf, ncol =1, rel_heigh
 CD4_colors_sig2_mlns <- c("purple", "lightblue","#C5000BFF", "grey")
 
 cd4_plot_annot_split_mlns_inf <- DimPlot(seurat_object_CD4[,seurat_object_CD4$Organ == "mLns" & seurat_object_CD4$Infection == "Ca"], reduction = "tsne_cd4_", group.by = "CD4_clust_annot_abund_sig", cols = CD4_colors_sig2_mlns, pt.size = 1) + ggtitle("Candida Colonized") + theme(plot.title = element_text(size = 10, face = "plain")) + NoLegend()
+
 cd4_plot_annot_split_mlns_noinf <- DimPlot(seurat_object_CD4[,seurat_object_CD4$Organ == "mLns" & seurat_object_CD4$Infection == "No"], reduction = "tsne_cd4_", group.by = "CD4_clust_annot_abund_sig", cols = CD4_colors_sig2_mlns, pt.size = 1) + ggtitle("No Infection") + theme(plot.title = element_text(size = 10, face = "plain")) + NoLegend()
+
 title <- ggplot() + theme_void() + ggtitle("         mLns cells by Infection")
 cd4_mlns_inf <- cowplot::plot_grid(cd4_plot_annot_split_mlns_inf, cd4_plot_annot_split_mlns_noinf, ncol = 2)
 cd4_mlns_inf_title <- cowplot::plot_grid(title, cd4_mlns_inf, ncol =1, rel_heights = c(0.1, 1))
 
 # Legend
-legend <- cowplot::get_legend(DimPlot(seurat_object_CD4[,seurat_object_CD4$Organ == "Colon" & seurat_object_CD4$Infection == "Ca"], reduction = "tsne_cd4_", group.by = "CD4_clust_annot_abund_sig", cols = CD4_colors_sig2, pt.size = 1) + ggtitle("Candida Colonized") + theme(plot.title = element_text(size = 10, face = "plain"), legend.position = "top", legend.text = element_text(size = 10)))
+legend <- cowplot::get_legend(DimPlot(seurat_object_CD4[,seurat_object_CD4$Organ == "Colon" & seurat_object_CD4$Infection == "Ca"], reduction = "tsne_cd4_", group.by = "CD4_clust_annot_abund_sig", cols = CD4_colors_sig2, pt.size = 1) + ggtitle("Candida Colonized") + theme(plot.title = element_text(size = 10, face = "plain"), legend.position = "top", legend.text = element_text(size = 10)) +  guides(color = guide_legend(nrow=2) ))
 
 title <- ggplot() + theme_void() + ggtitle("            CD4+ Cells by Infection State in each Organ") + theme(plot.title = element_text(size = 14, face = "bold"))
+
 organ_inf_tsne <- cowplot::plot_grid(cd4_colon_inf_title, cd4_lung_inf_title, cd4_mlns_inf_title, ncol = 1, labels = c("A", "B", "C"), rel_heights = c(1, 1, 1))
+
 organ_inf_tsne_w_title_legend <- cowplot::plot_grid(title, legend, organ_inf_tsne, ncol = 1, rel_heights = c(0.05, 0.05, 1))
+
 abundance_figure_cd4 <- cowplot::plot_grid(organ_inf_tsne_w_title_legend, final_abundance_graph_cd4_annot, ncol = 2, labels = c("", "D"), rel_widths = c(0.4, 0.6))
 ```
 
@@ -330,9 +335,9 @@ annot_df_sig_CD4 <- annot_df_sig
 ```{r}
 fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
 
-ggsave(filename = paste0(fig_directory, "figure_8.pdf"), plot = abundance_figure_cd4, device = "pdf", height = 14, width = 20)
+ggsave(filename = paste0(fig_directory, "figure_8.pdf"), plot = abundance_figure_cd4, device = "pdf", height = 9, width = 14)
 
-ggsave(filename = paste0(fig_directory, "figure_8.jpeg"), plot = abundance_figure_cd4, device = "jpeg", height = 14, width = 20)
+ggsave(filename = paste0(fig_directory, "figure_8.jpeg"), plot = abundance_figure_cd4, device = "jpeg", height = 9, width = 14)
 ```
 
 
@@ -554,12 +559,12 @@ annot_df_sig_CD8 <- annot_df_sig
 ```{r}
 fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
 
-ggsave(filename = paste0(fig_directory, "figure_9.pdf"), plot = abundance_figure_cd8, device = "pdf", height = 14, width = 20)
+ggsave(filename = paste0(fig_directory, "figure_9.pdf"), plot = abundance_figure_cd8, device = "pdf", height = 9, width = 14)
 
-ggsave(filename = paste0(fig_directory, "figure_9.jpeg"), plot = abundance_figure_cd8, device = "jpeg", height = 14, width = 20)
+ggsave(filename = paste0(fig_directory, "figure_9.jpeg"), plot = abundance_figure_cd8, device = "jpeg", height = 9, width = 14)
 ```
 
-# Supplemental Figure 11
+# Supplemental Figure 9
 
 ```{r}
 merged_df_CD4 <-  merged_df_CD4 %>%
@@ -636,9 +641,9 @@ all_abundance <- cowplot::plot_grid(all_abundance_graph_cd4_annot, all_abundance
 ```{r}
 fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
 
-ggsave(filename = paste0(fig_directory, "supplemental_11.pdf"), plot = all_abundance, device = "pdf", height = 14, width = 20)
+ggsave(filename = paste0(fig_directory, "supplemental_9.pdf"), plot = all_abundance, device = "pdf", height = 9, width = 15)
 
-ggsave(filename = paste0(fig_directory, "supplemental_11.jpeg"), plot = all_abundance, device = "jpeg", height = 14, width = 20)
+ggsave(filename = paste0(fig_directory, "supplemental_9.jpeg"), plot = all_abundance, device = "jpeg", height = 9, width = 15)
 ```
 
 

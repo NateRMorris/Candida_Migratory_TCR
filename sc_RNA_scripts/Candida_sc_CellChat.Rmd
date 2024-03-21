@@ -189,9 +189,9 @@ fig_12 <- ggarrange(
 ```{r}
 fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
 
-ggsave(filename = paste0(fig_directory, "figure_12.pdf"), plot = fig_12, device = "pdf", height = 16, width = 16)
+ggsave(filename = paste0(fig_directory, "figure_12.pdf"), plot = fig_12, device = "pdf", height = 8, width = 8)
 
-ggsave(filename = paste0(fig_directory, "figure_12.jpeg"), plot = fig_12, device = "jpeg", height = 16, width = 16)
+ggsave(filename = paste0(fig_directory, "figure_12.jpeg"), plot = fig_12, device = "jpeg", height = 8, width = 8)
 ```
 
 
@@ -210,7 +210,7 @@ patchwork::wrap_plots(plots = gg)
 ```
 
 For a specific cell type, you can see the associated signalling changes after infection
-```{r}
+```
 netAnalysis_signalingChanges_scatter(cellchat, idents.use = "KLRG1+ Eff CD8- Lung")
 p1 <- netAnalysis_signalingChanges_scatter(cellchat, idents.use = "KLRG1+ CD8 Eff - Lung",signaling.exclude = "GALECTIN")
 p2 <- netAnalysis_signalingChanges_scatter(cellchat, idents.use = "Th17 CD4")
@@ -301,35 +301,38 @@ ifn_circle <- netVisual_aggregate(object.list[[1]], signaling = pathway.show, la
 # Supplemental Figure 12
 
 ```{r}
-grid.grabExpr(il16_circle[[1]])
+#grid.grabExpr(il16_circle[[1]])
 
-cowplot::plot_grid( cowplot::plot_grid(il16_circle[[2]], labels = "A"), cowplot::plot_grid(ccl_circle[[1]], labels = "B"), nrow = 2)
+#cowplot::plot_grid( cowplot::plot_grid(il16_circle[[2]], labels = "A"), #cowplot::plot_grid(ccl_circle[[1]], labels = "B"), nrow = 2)
 
-supp_12a <- cowplot::plot_grid( il16_circle[[2]], labels = c("A"))
+supp_10a <- cowplot::plot_grid( il16_circle[[2]], labels = c("A"), label_size = 60)
 
-supp_12b <- cowplot::plot_grid(ccl_circle[[2]], labels = c("B"))
+supp_10b <- cowplot::plot_grid(ccl_circle[[2]], labels = c("B"), label_size = 60)
 
-supp_12c <- cowplot::plot_grid(il2_circle, nrow = 1, labels = c("C"))
+supp_10c <- cowplot::plot_grid(il2_circle, nrow = 1, labels = c("C"), label_size = 40)
 
-supp_12d <- cowplot::plot_grid(ifn_circle, nrow = 1, labels = c("D"))
+supp_10d <- cowplot::plot_grid(ifn_circle, nrow = 1, labels = c("D"), label_size = 40)
 
 ```
 
 
 ```{r}
-ggsave(filename = paste0(fig_directory, "supplemental_12a.pdf"), plot = supp_12a, device = "pdf", height = 20, width = 24, units = "in")
+ggsave(filename = paste0(fig_directory, "supplemental_10a.pdf"), plot = supp_10a, device = "pdf", height = 10, width = 16, units = "in")
 
-#ggsave(filename = paste0(fig_directory, "supplemental_12a.jpeg"), plot = supp_12a, device = "jpeg", height = 20, width = 24)
+#ggsave(filename = paste0(fig_directory, "supplemental_10a.jpeg"), plot = supp_10a, device = "jpeg", height = 18, width = 24)
 
-ggsave(filename = paste0(fig_directory, "supplemental_12b.pdf"), plot = supp_12b, device = "pdf", height = 20, width = 24, units = "in")
+ggsave(filename = paste0(fig_directory, "supplemental_10b.pdf"), plot = supp_10b, device = "pdf", height = 20, width = 24, units = "in")
 
-#ggsave(filename = paste0(fig_directory, "supplemental_12b.jpeg"), plot = supp_12b, device = "jpeg", height = 36, width = 30)
+#ggsave(filename = paste0(fig_directory, "supplemental_10b.jpeg"), plot = supp_10b, device = "jpeg", height = 18, width = 24)
 
-ggsave(filename = paste0(fig_directory, "supplemental_12c.pdf"), plot = supp_12c, device = "pdf", height = 20, width = 24)
+ggsave(filename = paste0(fig_directory, "supplemental_10c.pdf"), plot = supp_10c, device = "pdf", height = 20, width = 24)
 
-#ggsave(filename = paste0(fig_directory, "supplemental_12cd.jpeg"), plot = supp_12b, device = "jpeg", height = 36, width = 30)
+#ggsave(filename = paste0(fig_directory, "supplemental_10c.jpeg"), plot = supp_10c, device = "jpeg", height = 12, width = 14)
 
-ggsave(filename = paste0(fig_directory, "supplemental_12d.pdf"), plot = supp_12d, device = "pdf", height = 20, width = 24)
+ggsave(filename = paste0(fig_directory, "supplemental_10d.pdf"), plot = supp_10d, device = "pdf", height = 20, width = 24)
+
+#ggsave(filename = paste0(fig_directory, "supplemental_10d.jpeg"), plot = supp_10d, device = "jpeg", height = 12, width = 14)
+
 ```
 
 
@@ -406,6 +409,27 @@ figure_13_all <- cowplot::plot_grid(figure_13a, figure_13b, figure_13c, ncol = 1
 ggsave(filename = paste0(fig_directory, "figure_13.pdf"), plot = figure_13_all, device = "pdf", height = 24, width = 20)
 
 ggsave(filename = paste0(fig_directory, "figure_13.jpeg"), plot = figure_13_all, device = "jpeg", height = 24, width = 20)
+```
+
+```{r}
+# Split for Thesis
+
+#A
+ggsave(filename = paste0(fig_directory, "figure_13a.pdf"), plot = figure_13a, device = "pdf", height = 12, width = 10)
+
+ggsave(filename = paste0(fig_directory, "figure_13a.jpeg"), plot = plot_grid(figure_13a, labels = "A", label_size = 20), device = "jpeg", height = 12, width = 10)
+
+#B
+ggsave(filename = paste0(fig_directory, "figure_13b.pdf"), plot = plot_grid(figure_13b, labels = "B", label_size = 20), device = "pdf", height = 4, width = 10)
+
+ggsave(filename = paste0(fig_directory, "figure_13b.jpeg"), plot = plot_grid(figure_13b, labels = "B", label_size = 20), device = "jpeg", height = 4, width = 10)
+
+#C
+ggsave(filename = paste0(fig_directory, "figure_13c.pdf"), plot = plot_grid(figure_13c, labels = "C", label_size = 20), device = "pdf", height = 4, width = 10)
+
+ggsave(filename = paste0(fig_directory, "figure_13c.jpeg"), plot = plot_grid(figure_13c, labels = "C", label_size = 20), device = "jpeg", height = 4, width = 10)
+
+
 ```
 
 # Overall Differential Interaction Strengths

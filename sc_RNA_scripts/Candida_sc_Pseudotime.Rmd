@@ -27,7 +27,9 @@ library(ggpubr)
 library(scCustomize)
 library(gridExtra)
 library(monocle3)
+```
 
+```{r}
 ## For Reticulate (Python-R wrapper)
 conda_list()
 use_condaenv("r-reticulate")    #activate an environment e.g py2_env
@@ -242,8 +244,8 @@ pseudo_cd4_cd8 <- cowplot::plot_grid(cd4_pseudo, cd8_pseudo, ncol = 1)
 ```{r}
 fig_directory <- "/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Candida_Migratory_TCR/Figures_Tables/"
 
-ggsave(filename = paste0(fig_directory, "figure_11.pdf"), plot = pseudo_cd4_cd8, device = "pdf", height = 28, width = 26)
+ggsave(filename = paste0(fig_directory, "figure_11.pdf"), plot = pseudo_cd4_cd8, device = "pdf", height = 12, width = 12)
 
-ggsave(filename = paste0(fig_directory, "figure_11.jpeg"), plot = pseudo_cd4_cd8, device = "jpeg", height = 28, width = 26)
+ggsave(filename = paste0(fig_directory, "figure_11.jpeg"), plot = pseudo_cd4_cd8, device = "jpeg", height = 12, width = 12)
 ```
 

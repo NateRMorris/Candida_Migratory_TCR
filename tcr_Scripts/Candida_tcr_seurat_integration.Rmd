@@ -590,7 +590,7 @@ ggplot(clono.long, aes(x = Organ, y = Proportion_Value, fill = Proportion_Type))
 # Frequency Analysis
 #https://github.com/rnabioco/djvdj/blob/master/vignettes/frequency.Rmd
 
-vdj_dirs <- ("/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/TCR_data/")
+vdj_dirs <- ("/Users/johnmorris/Desktop/Comp_Bio_MS_Weill_Cornell/Summer_2023/Betel Lab/Betel:Iliev Candida Project/Candida_Migratory_TCR_Project/Data/TCR_data/")
 
 seurat_object_temp <- seurat_object
 temp <- as.vector(paste(colnames(seurat_object_temp), "-1", sep=""))
@@ -912,7 +912,7 @@ prolif_clust <- ggplot(df_melt_perc, aes(x = Cluster, y = percentage, fill = Mou
        y = "Percentage",
        fill = "Mouse") +
   scale_fill_manual(values = c("darkred", "navyblue", "forestgreen")) +
-  facet_wrap(~Cluster, scales = "free_x", nrow = 1)  # Facet by cell type
+  facet_wrap(~Cluster, scales = "free_x", nrow = 1, labeller = label_wrap_gen(width=10)) + theme(axis.text.x=element_blank())  # Facet by cell type
 ```
 
 
@@ -930,6 +930,35 @@ ggsave(filename = paste0(fig_directory, "figure_14.pdf"), plot = fig_14, device 
 ggsave(filename = paste0(fig_directory, "figure_14.jpeg"), plot = fig_14, device = "jpeg", height = 16, width = 24)
 ```
 
+```{r}
+# Split for thesis
+
+#A
+fig14_a <- cowplot::plot_grid(all_clonos_2_up, labels = c("A"), label_size = 30)
+
+ggsave(filename = paste0(fig_directory, "figure_14a.pdf"), plot = fig14_a, device = "pdf", height = 10, width = 14)
+
+ggsave(filename = paste0(fig_directory, "figure_14a.jpeg"), plot = fig14_a, device = "jpeg", height = 10, width = 14)
+
+
+#B
+
+fig14_b <- cowplot::plot_grid(prolif_perc, labels = c("B"), label_size = 30)
+
+ggsave(filename = paste0(fig_directory, "figure_14b.pdf"), plot = fig14_b, device = "pdf", height = 8, width = 8)
+
+ggsave(filename = paste0(fig_directory, "figure_14b.jpeg"), plot = fig14_b, device = "jpeg", height = 8, width = 8)
+
+
+#C
+
+fig14_c <- cowplot::plot_grid(prolif_clust, labels = c("C"), label_size = 30)
+
+ggsave(filename = paste0(fig_directory, "figure_14c.pdf"), plot = fig14_c, device = "pdf", height = 8, width = 18)
+
+ggsave(filename = paste0(fig_directory, "figure_14c.jpeg"), plot = fig14_c, device = "jpeg", height = 8, width = 18)
+
+```
 
 # Number of Proliferative Clonotypes Statistic
 
